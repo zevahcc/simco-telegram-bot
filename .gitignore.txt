@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.env
+alerts.json
+last_alerted_datetimes.json
