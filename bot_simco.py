@@ -318,7 +318,8 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             resource_name = data['resource']['resourceName']
             summaries_by_quality = data['resource']['summariesByQuality']
 
-            message = f"📊 Información del Recurso: *{resource_name}* (ID: `{resource_id}`)\n\n"
+            # Escapar los paréntesis en el mensaje inicial
+            message = f"📊 Información del Recurso: *{resource_name}* \\(ID: `{resource_id}`\\)\n\n"
 
             # Mostrar información para cada calidad disponible
             if summaries_by_quality:
@@ -335,6 +336,8 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                         volume = last_day_candlestick.get('volume', 'N/A')
                         vwap = last_day_candlestick.get('vwap', 'N/A')
 
+                        # Escapar los caracteres especiales para MarkdownV2 en las líneas de números
+                        # Agregado escape para la coma (,) que puede aparecer en el volumen.
                         message += (
                             f"  Apertura: `{open_price:.3f}`\n"
                             f"  Mínimo: `{low_price:.3f}`\n"
@@ -342,7 +345,7 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                             f"  Cierre: `{close_price:.3f}`\n"
                             f"  Volumen: `{volume:,}`\n"
                             f"  VWAP: `{vwap:.3f}`\n"
-                        ).replace('.', '\\.').replace('-', '\\-') # Escapar caracteres especiales para MarkdownV2
+                        ).replace('.', '\\.').replace('-', '\\-').replace(',', '\\,')
 
                     else:
                         message += "  Datos del último día no disponibles.\n"
