@@ -202,7 +202,7 @@ async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         
         initial_len = len(alerts)
 
-         alerts = [
+        alerts = [
             alert_data for alert_data in alerts 
             if not (alert_data['id'] == alert_id_to_delete and alert_data['user_id'] == user_id)
         ]
