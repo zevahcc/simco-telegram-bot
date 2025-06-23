@@ -23,8 +23,11 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("No se ha configurado la variable de entorno TELEGRAM_BOT_TOKEN.")
+
+# Código de administrador
+ADMIN_CODE = "2358" # El código que los administradores deben usar
+
 API_URL = "https://api.simcotools.com/v1/realms/0/market/prices"
-# Nueva URL para la API de recursos
 RESOURCE_API_BASE_URL = "https://api.simcotools.com/v1/realms/0/market/resources/"
 ALERTS_FILE = "alerts.json"
 LAST_ALERTED_DATETIMES_FILE = "last_alerted_datetimes.json"
@@ -74,7 +77,6 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Muestra los comandos disponibles."""
     help_message = (
         "Comandos disponibles:\n"
-        # Escapamos < y > para los parámetros del comando /alert
         "**/alert \\<price objetivo\\> \\<resourceId\\> \\[quality\\] \\[name\\]**\n"
         "\\- Crea una nueva alerta de precio\\.\n"
         "\\- \\`price objetivo\\`: El precio máximo al que deseas comprar\\.\n"
@@ -83,14 +85,14 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "\\- \\`name\\` \\(opcional\\): Un nombre para tu alerta\\.\n\n"
         "**/status**\n"
         "\\- Muestra el estado actual del bot\\.\n\n"
-        "**/alerts**\n"
-        "\\- Muestra todas las alertas activas\\.\n\n"
-        "**/delete \\<id\\>**\n" # Escapamos < y > para el parámetro <id>
-        "\\- Elimina una alerta por su ID\\.\n\n"
-        # Escapamos < y > para los parámetros del comando /price
+        "**/alerts \\[admin_code\\]**\n"
+        "\\- Muestra todas tus alertas activas\\.\n"
+        "\\- Si eres administrador y usas el `admin_code`, muestra todas las alertas del bot\\.\n\n"
+        "**/delete \\<id\\> \\[admin_code\\]**\n"
+        "\\- Elimina una alerta por su ID\\.\n"
+        "\\- Si eres administrador y usas el `admin_code`, puedes eliminar la alerta de cualquier usuario\\.\n\n"
         "**/price \\<resourceId\\> \\[quality\\]**\n"
         "\\- Muestra el precio actual del mercado para un recurso\\.\n\n"
-        # Nuevo comando /resource con calidad opcional
         "**/resource \\<resourceId\\> \\[quality\\]**\n"
         "\\- Muestra información detallada sobre un recurso y sus precios del último día\\.\n\n"
         "**/help**\n"
@@ -174,62 +176,103 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Muestra todas las alertas activas del usuario."""
+    """
+    Muestra las alertas activas.
+    Si se proporciona el ADMIN_CODE, muestra todas las alertas.
+    Uso: /alerts [admin_code]
+    """
     user_id = update.effective_user.id
-    user_alerts = [a for a in alerts if a['user_id'] == user_id]
+    is_admin = False
+    
+    # Check for admin code
+    if context.args and len(context.args) == 1 and context.args[0] == ADMIN_CODE:
+        is_admin = True
+        alerts_to_show = alerts # Show all alerts
+        message_title = "Todas las alertas activas (ADMIN):\n\n"
+    else:
+        alerts_to_show = [a for a in alerts if a['user_id'] == user_id] # Show user's alerts
+        message_title = "Tus alertas activas:\n\n"
 
-    if not user_alerts:
-        await update.message.reply_text("No tienes alertas activas.")
+    if not alerts_to_show:
+        if is_admin:
+            await update.message.reply_text("No hay alertas activas en el bot.")
+        else:
+            await update.message.reply_text("No tienes alertas activas.")
         return
 
-    message = "Tus alertas activas:\n\n"
-    for alert_data in user_alerts:
+    message = message_title
+    for alert_data in alerts_to_show:
         quality_info = f"Quality >= {alert_data['quality']}" if alert_data['quality'] is not None else "Todas las calidades"
+        # Incluir user_id si se está mostrando como admin
+        user_id_info = f"User ID: `{alert_data['user_id']}`\n" if is_admin else ""
+        
         message += (
             f"ID: {alert_data['id']}\n"
             f"Nombre: {alert_data['name']}\n"
             f"Resource ID: {alert_data['resource_id']}\n"
             f"Precio Objetivo: {alert_data['target_price']}\n"
             f"{quality_info}\n"
+            f"{user_id_info}" # Añadir esta línea
             f"---\n"
         )
-    await update.message.reply_text(message)
+    await update.message.reply_markdown_v2(message)
+
 
 async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Elimina una alerta por su ID."""
+    """
+    Elimina una alerta por su ID.
+    Si se proporciona el ADMIN_CODE, un administrador puede eliminar cualquier alerta.
+    Uso: /delete <id> [admin_code]
+    """
 
     global alerts
     global last_alerted_datetimes
 
     args = context.args
-    if not args or len(args) != 1:
-        await update.message.reply_text("Uso incorrecto. Ejemplo: `/delete 1`")
+    if not args or len(args) < 1 or len(args) > 2:
+        await update.message.reply_text("Uso incorrecto. Ejemplo: `/delete 1` o `/delete 1 2358`")
         return
 
     try:
         alert_id_to_delete = int(args[0])
         user_id = update.effective_user.id
+        is_admin = False
 
+        # Check for admin code as the second argument
+        if len(args) == 2 and args[1] == ADMIN_CODE:
+            is_admin = True
+        
         initial_len = len(alerts)
-
-        alerts[:] = [
-            alert_data for alert_data in alerts
-            if not (alert_data['id'] == alert_id_to_delete and alert_data['user_id'] == user_id)
-        ]
-
+        
+        # Filter alerts based on admin status or user_id
+        if is_admin:
+            # Admin can delete any alert by ID
+            alerts[:] = [
+                alert_data for alert_data in alerts
+                if not (alert_data['id'] == alert_id_to_delete)
+            ]
+        else:
+            # Non-admin can only delete their own alerts
+            alerts[:] = [
+                alert_data for alert_data in alerts
+                if not (alert_data['id'] == alert_id_to_delete and alert_data['user_id'] == user_id)
+            ]
+        
         if len(alerts) < initial_len:
             save_alerts(alerts)
-            # Eliminar el datetime de la última alerta si existiera
-            key_to_delete = f"{user_id}-{alert_id_to_delete}"
-            if key_to_delete in last_alerted_datetimes:
-                del last_alerted_datetimes[key_to_delete]
-                save_last_alerted_datetimes(last_alerted_datetimes)
+            # Find the alert key to delete from last_alerted_datetimes
+            # This requires knowing the original user_id of the deleted alert
+            # A simpler approach for admin is to clear all related entries for that alert_id
+            keys_to_delete = [key for key in last_alerted_datetimes if key.endswith(f"-{alert_id_to_delete}")]
+            for key in keys_to_delete:
+                del last_alerted_datetimes[key]
+            save_last_alerted_datetimes(last_alerted_datetimes)
 
-            await update.message.reply_text(f"✅ Alerta con ID {alert_id_to_delete} eliminada.")
+            await update.message.reply_text(f"✅ Alerta con ID {alert_id_to_delete} eliminada{' (por administrador)' if is_admin else ''}.")
         else:
             await update.message.reply_text(f"No se encontró una alerta con ID {alert_id_to_delete} o no tienes permiso para eliminarla.")
     except ValueError:
-        await update.message.reply_text("El ID debe ser un número.")
+        await update.message.reply_text("El ID o el código de administrador debe ser un número válido.")
     except Exception as e:
         logger.error(f"Error al eliminar alerta: {e}")
         await update.message.reply_text("Ocurrió un error al eliminar la alerta.")
@@ -385,7 +428,6 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     await update.message.reply_text(f"No se encontraron datos de mercado para el Resource ID {resource_id}.")
 
     except ValueError:
-        # Este ValueError se captura si resource_id no es un entero.
         await update.message.reply_text("El `resourceId` debe ser un número entero válido.")
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
@@ -394,11 +436,9 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text(f"Error al obtener datos de la API de recursos: {e.response.status_code}")
         logger.error(f"Error HTTP al obtener información del recurso: {e}")
     except KeyError as e:
-        # Este KeyError se captura si la estructura JSON de la API no es la esperada.
         await update.message.reply_text(f"Error al procesar los datos del recurso. Faltan datos esperados: {e}")
         logger.error(f"Error de clave en la respuesta de la API de recursos: {e}", exc_info=True)
     except Exception as e:
-        # Este es el bloque de captura general para cualquier otro error inesperado.
         logger.error(f"Error inesperado al obtener información del recurso: {e}", exc_info=True)
         await update.message.reply_text("Ocurrió un error inesperado al obtener la información del recurso. Por favor, inténtalo de nuevo más tarde.")
 
@@ -494,7 +534,6 @@ def main() -> None:
     application.add_handler(CommandHandler("alerts", show_alerts))
     application.add_handler(CommandHandler("delete", delete_alert))
     application.add_handler(CommandHandler("price", get_price))
-    # Añadir el nuevo manejador de comandos para /resource
     application.add_handler(CommandHandler("resource", get_resource_info))
 
 
