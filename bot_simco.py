@@ -72,21 +72,23 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Muestra los comandos disponibles."""
     help_message = (
         "Comandos disponibles:\n"
-        "\\*\\*/alert <price objetivo> <resourceId> \\[quality\\] \\[name\\]\\*\\*\n" # Escapado de [] para que no sean links
-        "\\- Crea una nueva alerta de precio\\.\n" # Escapado del guion y el punto
-        "\\- \\`price objetivo\\`: El precio máximo al que deseas comprar\\.\n" # Escapado de backticks y puntos
-        "\\- \\`resourceId\\`: El ID del recurso \\(número entero\\)\\.\n" # Escapado de paréntesis
+        # Escapamos < y > para los parámetros del comando /alert
+        "**/alert \\<price objetivo\\> \\<resourceId\\> \\[quality\\] \\[name\\]**\n" 
+        "\\- Crea una nueva alerta de precio\\.\n"
+        "\\- \\`price objetivo\\`: El precio máximo al que deseas comprar\\.\n"
+        "\\- \\`resourceId\\`: El ID del recurso \\(número entero\\)\\.\n"
         "\\- \\`quality\\` \\(opcional\\): La calidad mínima del recurso \\(0\\-12\\)\\.\n"
         "\\- \\`name\\` \\(opcional\\): Un nombre para tu alerta\\.\n\n"
-        "\\*\\*/status\\*\\*\n"
+        "**/status**\n"
         "\\- Muestra el estado actual del bot\\.\n\n"
-        "\\*\\*/alerts\\*\\*\n"
+        "**/alerts**\n"
         "\\- Muestra todas las alertas activas\\.\n\n"
-        "\\*\\*/delete <id>\\*\\*\n"
+        "**/delete \\<id\\>**\n" # Escapamos < y > para el parámetro <id>
         "\\- Elimina una alerta por su ID\\.\n\n"
-        "\\*\\*/price <resourceId> \\[quality\\]\\*\\*\n"
+        # Escapamos < y > para los parámetros del comando /price
+        "**/price \\<resourceId\\> \\[quality\\]**\n" 
         "\\- Muestra el precio actual del mercado para un recurso\\.\n\n"
-        "\\*\\*/help\\*\\*\n"
+        "**/help**\n"
         "\\- Muestra esta ayuda\\."
     )
     await update.message.reply_markdown_v2(help_message)
