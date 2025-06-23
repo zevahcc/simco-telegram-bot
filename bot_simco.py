@@ -24,6 +24,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("No se ha configurado la variable de entorno TELEGRAM_BOT_TOKEN.")
 API_URL = "https://api.simcotools.com/v1/realms/0/market/prices"
+# Nueva URL para la API de recursos
+RESOURCE_API_BASE_URL = "https://api.simcotools.com/v1/realms/0/market/resources/"
 ALERTS_FILE = "alerts.json"
 LAST_ALERTED_DATETIMES_FILE = "last_alerted_datetimes.json"
 
@@ -73,7 +75,7 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     help_message = (
         "Comandos disponibles:\n"
         # Escapamos < y > para los parámetros del comando /alert
-        "**/alert \\<price objetivo\\> \\<resourceId\\> \\[quality\\] \\[name\\]**\n" 
+        "**/alert \\<price objetivo\\> \\<resourceId\\> \\[quality\\] \\[name\\]**\n"
         "\\- Crea una nueva alerta de precio\\.\n"
         "\\- \\`price objetivo\\`: El precio máximo al que deseas comprar\\.\n"
         "\\- \\`resourceId\\`: El ID del recurso \\(número entero\\)\\.\n"
@@ -86,8 +88,11 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "**/delete \\<id\\>**\n" # Escapamos < y > para el parámetro <id>
         "\\- Elimina una alerta por su ID\\.\n\n"
         # Escapamos < y > para los parámetros del comando /price
-        "**/price \\<resourceId\\> \\[quality\\]**\n" 
+        "**/price \\<resourceId\\> \\[quality\\]**\n"
         "\\- Muestra el precio actual del mercado para un recurso\\.\n\n"
+        # Nuevo comando /resource
+        "**/resource \\<resourceId\\>**\n"
+        "\\- Muestra información detallada sobre un recurso y sus precios del último día\\.\n\n"
         "**/help**\n"
         "\\- Muestra esta ayuda\\."
     )
@@ -125,7 +130,7 @@ async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 # Si el tercer argumento es un número, el cuarto sería el nombre
                 if len(args) > 3:
                     name = " ".join(args[3:])
-        
+
         # Asignar un ID único a la alerta
         alert_id = 1
         if alerts:
@@ -193,8 +198,8 @@ async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Elimina una alerta por su ID."""
 
-    global alerts # <--- MUEVE esta línea AQUÍ
-    global last_alerted_datetimes # <--- También es buena práctica declararlo global si lo vas a modificar
+    global alerts
+    global last_alerted_datetimes
 
     args = context.args
     if not args or len(args) != 1:
@@ -204,14 +209,14 @@ async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     try:
         alert_id_to_delete = int(args[0])
         user_id = update.effective_user.id
-        
+
         initial_len = len(alerts)
 
-        alerts = [
-            alert_data for alert_data in alerts 
+        alerts[:] = [
+            alert_data for alert_data in alerts
             if not (alert_data['id'] == alert_id_to_delete and alert_data['user_id'] == user_id)
         ]
-        
+
         if len(alerts) < initial_len:
             save_alerts(alerts)
             # Eliminar el datetime de la última alerta si existiera
@@ -253,13 +258,13 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             response = await client.get(API_URL)
             response.raise_for_status()
             data = response.json()
-            
+
             found_prices = []
             for item in data['prices']:
                 if item['resourceId'] == resource_id:
                     if quality_filter is None or item['quality'] >= quality_filter:
                         found_prices.append(item)
-            
+
             if found_prices:
                 message = f"Precios actuales para Resource ID {resource_id}"
                 if quality_filter is not None:
@@ -284,6 +289,84 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error al obtener precio: {e}")
         await update.message.reply_text("Ocurrió un error al obtener el precio actual.")
 
+# --- Nueva función para el comando /resource ---
+async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Obtiene y muestra información detallada de un recurso usando su resourceId.
+    Uso: /resource <resourceId>
+    """
+    args = context.args
+    if not args or len(args) != 1:
+        await update.message.reply_text(
+            "Uso incorrecto. Ejemplo: `/resource 1`"
+        )
+        return
+
+    try:
+        resource_id = int(args[0])
+        if not (1 <= resource_id <= 200):
+            await update.message.reply_text("El `resourceId` debe ser un número entero entre 1 y 200.")
+            return
+
+        full_resource_api_url = f"{RESOURCE_API_BASE_URL}{resource_id}"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(full_resource_api_url)
+            response.raise_for_status() # Lanza una excepción si la respuesta no es 2xx
+            data = response.json()
+
+            resource_name = data['resource']['resourceName']
+            summaries_by_quality = data['resource']['summariesByQuality']
+
+            message = f"📊 Información del Recurso: *{resource_name}* (ID: `{resource_id}`)\n\n"
+
+            # Mostrar información para cada calidad disponible
+            if summaries_by_quality:
+                for summary in summaries_by_quality:
+                    quality = summary['quality']
+                    last_day_candlestick = summary.get('lastDayCandlestick')
+
+                    message += f"➡️ Calidad: `{quality}`\n"
+                    if last_day_candlestick:
+                        open_price = last_day_candlestick.get('open', 'N/A')
+                        low_price = last_day_candlestick.get('low', 'N/A')
+                        high_price = last_day_candlestick.get('high', 'N/A')
+                        close_price = last_day_candlestick.get('close', 'N/A')
+                        volume = last_day_candlestick.get('volume', 'N/A')
+                        vwap = last_day_candlestick.get('vwap', 'N/A')
+
+                        message += (
+                            f"  Apertura: `{open_price:.3f}`\n"
+                            f"  Mínimo: `{low_price:.3f}`\n"
+                            f"  Máximo: `{high_price:.3f}`\n"
+                            f"  Cierre: `{close_price:.3f}`\n"
+                            f"  Volumen: `{volume:,}`\n"
+                            f"  VWAP: `{vwap:.3f}`\n"
+                        ).replace('.', '\\.').replace('-', '\\-') # Escapar caracteres especiales para MarkdownV2
+
+                    else:
+                        message += "  Datos del último día no disponibles.\n"
+                    message += "\n"
+                await update.message.reply_markdown_v2(message)
+            else:
+                await update.message.reply_text(f"No se encontraron datos de mercado para el Resource ID {resource_id}.")
+
+    except ValueError:
+        await update.message.reply_text("El `resourceId` debe ser un número entero válido.")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            await update.message.reply_text(f"Resource ID {resource_id} no encontrado en la API. Por favor, verifica el ID.")
+        else:
+            await update.message.reply_text(f"Error al obtener datos de la API de recursos: {e.response.status_code}")
+        logger.error(f"Error HTTP al obtener información del recurso: {e}")
+    except KeyError as e:
+        await update.message.reply_text(f"Error al procesar los datos del recurso. Faltan datos esperados: {e}")
+        logger.error(f"Error de clave en la respuesta de la API de recursos: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error inesperado al obtener información del recurso: {e}", exc_info=True)
+        await update.message.reply_text("Ocurrió un error al obtener la información del recurso.")
+
+
 # --- Lógica de Verificación de Alertas (Job del Bot) ---
 
 async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -298,7 +381,7 @@ async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             response = await client.get(API_URL)
             response.raise_for_status()
             market_data = response.json()['prices']
-            
+
             current_time = datetime.now()
 
             for alert_data in list(alerts):  # Usar una copia para evitar problemas si se elimina una alerta
@@ -320,7 +403,7 @@ async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
                         current_price = item['price']
                         item_datetime_str = item['datetime']
-                        
+
                         # Convertir a datetime con conciencia de zona horaria (UTC)
                         item_datetime = datetime.fromisoformat(item_datetime_str.replace('Z', '+00:00'))
 
@@ -342,7 +425,7 @@ async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                                     f"Última actualización: {item_datetime.strftime('%Y-%m-%d %H:%M:%S')}"
                                 )
                                 await context.bot.send_message(chat_id=user_id, text=message)
-                                
+
                                 # Actualizar el datetime de la última alerta
                                 last_alerted_datetimes[alert_key] = item_datetime_str
                                 save_last_alerted_datetimes(last_alerted_datetimes)
@@ -356,7 +439,7 @@ async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     # Sin embargo, la lógica del problema indica "si el datetime cambia Y el price sigue igual o menor, volver a dar la alerta"
                     # Esto ya se maneja con `item_datetime > last_alert_datetime`.
                     # Este bloque podría ser para resetear si la condición deja de cumplirse, pero no es explícitamente pedido así.
-                    pass 
+                    pass
 
     except httpx.HTTPStatusError as e:
         logger.error(f"Error HTTP al verificar precios: {e}")
@@ -375,6 +458,9 @@ def main() -> None:
     application.add_handler(CommandHandler("alerts", show_alerts))
     application.add_handler(CommandHandler("delete", delete_alert))
     application.add_handler(CommandHandler("price", get_price))
+    # Añadir el nuevo manejador de comandos para /resource
+    application.add_handler(CommandHandler("resource", get_resource_info))
+
 
     # Configurar el Job Queue para la verificación de precios
     job_queue: JobQueue = application.job_queue
