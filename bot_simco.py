@@ -336,16 +336,25 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                         volume = last_day_candlestick.get('volume', 'N/A')
                         vwap = last_day_candlestick.get('vwap', 'N/A')
 
-                        # Escapar los caracteres especiales para MarkdownV2 en las líneas de números
-                        # Agregado escape para la coma (,) que puede aparecer en el volumen.
+                        # Formatear números solo si no son 'N/A'
+                        open_str = f"{open_price:.3f}" if isinstance(open_price, (int, float)) else str(open_price)
+                        low_str = f"{low_price:.3f}" if isinstance(low_price, (int, float)) else str(low_price)
+                        high_str = f"{high_price:.3f}" if isinstance(high_price, (int, float)) else str(high_price)
+                        close_str = f"{close_price:.3f}" if isinstance(close_price, (int, float)) else str(close_price)
+                        # Modificación aquí: aplicar formato de miles solo si es un número
+                        volume_str = f"{volume:,}" if isinstance(volume, (int, float)) else str(volume)
+                        vwap_str = f"{vwap:.3f}" if isinstance(vwap, (int, float)) else str(vwap)
+
+                        # Escapar los caracteres especiales para MarkdownV2
                         message += (
-                            f"  Apertura: `{open_price:.3f}`\n"
-                            f"  Mínimo: `{low_price:.3f}`\n"
-                            f"  Máximo: `{high_price:.3f}`\n"
-                            f"  Cierre: `{close_price:.3f}`\n"
-                            f"  Volumen: `{volume:,}`\n"
-                            f"  VWAP: `{vwap:.3f}`\n"
-                        ).replace('.', '\\.').replace('-', '\\-').replace(',', '\\,')
+                            f"  Apertura: `{open_str}`\n"
+                            f"  Mínimo: `{low_str}`\n"
+                            f"  Máximo: `{high_str}`\n"
+                            f"  Cierre: `{close_str}`\n"
+                            f"  Volumen: `{volume_str}`\n"
+                            f"  VWAP: `{vwap_str}`\n"
+                        ).replace('.', '\\.').replace('-', '\\-').replace(',', '\\,') # El escape de ',' se mantiene por si los valores numéricos ya vienen con comas en la API, o si 'N/A' contiene una coma.
+
 
                     else:
                         message += "  Datos del último día no disponibles.\n"
@@ -355,6 +364,7 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await update.message.reply_text(f"No se encontraron datos de mercado para el Resource ID {resource_id}.")
 
     except ValueError:
+        # Este ValueError se captura si resource_id no es un entero.
         await update.message.reply_text("El `resourceId` debe ser un número entero válido.")
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
@@ -363,11 +373,13 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text(f"Error al obtener datos de la API de recursos: {e.response.status_code}")
         logger.error(f"Error HTTP al obtener información del recurso: {e}")
     except KeyError as e:
+        # Este KeyError se captura si la estructura JSON de la API no es la esperada.
         await update.message.reply_text(f"Error al procesar los datos del recurso. Faltan datos esperados: {e}")
         logger.error(f"Error de clave en la respuesta de la API de recursos: {e}", exc_info=True)
     except Exception as e:
+        # Este es el bloque de captura general para cualquier otro error inesperado.
         logger.error(f"Error inesperado al obtener información del recurso: {e}", exc_info=True)
-        await update.message.reply_text("Ocurrió un error al obtener la información del recurso.")
+        await update.message.reply_text("Ocurrió un error inesperado al obtener la información del recurso. Por favor, inténtalo de nuevo más tarde.")
 
 
 # --- Lógica de Verificación de Alertas (Job del Bot) ---
