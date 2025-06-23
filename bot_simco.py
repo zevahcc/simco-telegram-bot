@@ -19,7 +19,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Constantes y Configuraciones ---
-TELEGRAM_BOT_TOKEN = "7774762013:AAHPM6Q-_A1TtxQaz8U1c9v8R7G1glWEKIQ"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TELEGRAM_BOT_TOKEN:
+    raise ValueError("No se ha configurado la variable de entorno TELEGRAM_BOT_TOKEN.")
 API_URL = "https://api.simcotools.com/v1/realms/0/market/prices"
 ALERTS_FILE = "alerts.json"
 LAST_ALERTED_DATETIMES_FILE = "last_alerted_datetimes.json"
