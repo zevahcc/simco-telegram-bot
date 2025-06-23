@@ -90,8 +90,8 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Escapamos < y > para los parámetros del comando /price
         "**/price \\<resourceId\\> \\[quality\\]**\n"
         "\\- Muestra el precio actual del mercado para un recurso\\.\n\n"
-        # Nuevo comando /resource
-        "**/resource \\<resourceId\\>**\n"
+        # Nuevo comando /resource con calidad opcional
+        "**/resource \\<resourceId\\> \\[quality\\]**\n"
         "\\- Muestra información detallada sobre un recurso y sus precios del último día\\.\n\n"
         "**/help**\n"
         "\\- Muestra esta ayuda\\."
@@ -292,13 +292,13 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # --- Nueva función para el comando /resource ---
 async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Obtiene y muestra información detallada de un recurso usando su resourceId.
-    Uso: /resource <resourceId>
+    Obtiene y muestra información detallada de un recurso usando su resourceId y opcionalmente quality.
+    Uso: /resource <resourceId> [quality]
     """
     args = context.args
-    if not args or len(args) != 1:
+    if not args or len(args) < 1 or len(args) > 2: # Allow 1 or 2 arguments
         await update.message.reply_text(
-            "Uso incorrecto. Ejemplo: `/resource 1`"
+            "Uso incorrecto. Ejemplo: `/resource 1` o `/resource 1 0`"
         )
         return
 
@@ -307,6 +307,16 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if not (1 <= resource_id <= 200):
             await update.message.reply_text("El `resourceId` debe ser un número entero entre 1 y 200.")
             return
+
+        quality_filter = None
+        if len(args) == 2:
+            try:
+                quality_filter = int(args[1])
+                if not (0 <= quality_filter <= 12):
+                    raise ValueError("La calidad debe estar entre 0 y 12.")
+            except ValueError:
+                await update.message.reply_text("La calidad debe ser un número entero entre 0 y 12.")
+                return
 
         full_resource_api_url = f"{RESOURCE_API_BASE_URL}{resource_id}"
 
@@ -319,11 +329,20 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             summaries_by_quality = data['resource']['summariesByQuality']
 
             # Escapar los paréntesis en el mensaje inicial
-            message = f"📊 Información del Recurso: *{resource_name}* \\(ID: `{resource_id}`\\)\n\n"
+            message = f"📊 Información del Recurso: *{resource_name}* \\(ID: `{resource_id}`\\)\n"
+            if quality_filter is not None:
+                message += f"Para Calidad: `{quality_filter}`\n\n"
+            else:
+                message += "\n"
 
-            # Mostrar información para cada calidad disponible
+            found_summaries = []
             if summaries_by_quality:
                 for summary in summaries_by_quality:
+                    if quality_filter is None or summary['quality'] == quality_filter:
+                        found_summaries.append(summary)
+
+            if found_summaries:
+                for summary in found_summaries:
                     quality = summary['quality']
                     last_day_candlestick = summary.get('lastDayCandlestick')
 
@@ -341,7 +360,6 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                         low_str = f"{low_price:.3f}" if isinstance(low_price, (int, float)) else str(low_price)
                         high_str = f"{high_price:.3f}" if isinstance(high_price, (int, float)) else str(high_price)
                         close_str = f"{close_price:.3f}" if isinstance(close_price, (int, float)) else str(close_price)
-                        # Modificación aquí: aplicar formato de miles solo si es un número
                         volume_str = f"{volume:,}" if isinstance(volume, (int, float)) else str(volume)
                         vwap_str = f"{vwap:.3f}" if isinstance(vwap, (int, float)) else str(vwap)
 
@@ -353,7 +371,7 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                             f"  Cierre: `{close_str}`\n"
                             f"  Volumen: `{volume_str}`\n"
                             f"  VWAP: `{vwap_str}`\n"
-                        ).replace('.', '\\.').replace('-', '\\-').replace(',', '\\,') # El escape de ',' se mantiene por si los valores numéricos ya vienen con comas en la API, o si 'N/A' contiene una coma.
+                        ).replace('.', '\\.').replace('-', '\\-').replace(',', '\\,')
 
 
                     else:
@@ -361,7 +379,10 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     message += "\n"
                 await update.message.reply_markdown_v2(message)
             else:
-                await update.message.reply_text(f"No se encontraron datos de mercado para el Resource ID {resource_id}.")
+                if quality_filter is not None:
+                    await update.message.reply_text(f"No se encontraron datos para el Resource ID {resource_id} con calidad {quality_filter}.")
+                else:
+                    await update.message.reply_text(f"No se encontraron datos de mercado para el Resource ID {resource_id}.")
 
     except ValueError:
         # Este ValueError se captura si resource_id no es un entero.
