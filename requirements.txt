@@ -1,3 +1,0 @@
-git add .
-git commit -m "Feature: Implemented quality range in alerts; Refactor: Removed pytz dependency and improved alert handling."
-git push origin main
