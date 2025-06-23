@@ -68,7 +68,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Usa /help para ver los comandos disponibles."
     )
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Muestra los comandos disponibles."""
     help_message = (
         "Comandos disponibles:\n"
