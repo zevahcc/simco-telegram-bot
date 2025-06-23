@@ -1,2 +1,0 @@
-python-telegram-bot==20.X  # Make sure you put your exact version here, e.g., 20.8, 20.9
-httpx
