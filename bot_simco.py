@@ -64,6 +64,16 @@ def save_last_alerted_datetimes(datetimes):
 alerts = load_alerts()
 last_alerted_datetimes = load_last_alerted_datetimes()
 
+# --- Helper function for MarkdownV2 escaping ---
+def escape_markdown_v2(text: str) -> str:
+    """Escapa caracteres especiales para Telegram MarkdownV2."""
+    # Lista de caracteres especiales que necesitan ser escapados en MarkdownV2
+    # https://core.telegram.org/bots/api#formatting-options
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    # Crear una tabla de traducción para el método str.translate
+    translator = str.maketrans({char: '\\' + char for char in escape_chars})
+    return text.translate(translator)
+
 # --- Comandos del Bot ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -183,7 +193,7 @@ async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     """
     user_id = update.effective_user.id
     is_admin = False
-    
+
     # Check for admin code
     if context.args and len(context.args) == 1 and context.args[0] == ADMIN_CODE:
         is_admin = True
@@ -200,20 +210,29 @@ async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text("No tienes alertas activas.")
         return
 
-    message = message_title
+    # Escape the title as well, just in case it contains special markdown characters
+    message = escape_markdown_v2(message_title)
     for alert_data in alerts_to_show:
         quality_info = f"Quality >= {alert_data['quality']}" if alert_data['quality'] is not None else "Todas las calidades"
-        # Incluir user_id si se está mostrando como admin
+        # User ID info is already inside backticks, so it's treated as literal code,
+        # no further escaping needed for its content.
         user_id_info = f"User ID: `{alert_data['user_id']}`\n" if is_admin else ""
-        
+
+        # Escape individual components that might contain special MarkdownV2 characters
+        alert_id_str = str(alert_data['id']) # ID is an integer, usually no special chars
+        name_str = escape_markdown_v2(str(alert_data['name'])) # Name can be user-defined, needs escaping
+        resource_id_str = str(alert_data['resource_id']) # Resource ID is an integer
+        target_price_str = escape_markdown_v2(f"{alert_data['target_price']:.3f}") # Price is float, needs escaping
+        quality_info_str = escape_markdown_v2(quality_info) # Quality info string might contain special chars
+
         message += (
-            f"ID: {alert_data['id']}\n"
-            f"Nombre: {alert_data['name']}\n"
-            f"Resource ID: {alert_data['resource_id']}\n"
-            f"Precio Objetivo: {alert_data['target_price']}\n"
-            f"{quality_info}\n"
-            f"{user_id_info}" # Añadir esta línea
-            f"---\n"
+            f"ID: {alert_id_str}\n"
+            f"Nombre: {name_str}\n"
+            f"Resource ID: {resource_id_str}\n"
+            f"Precio Objetivo: {target_price_str}\n"
+            f"{quality_info_str}\n"
+            f"{user_id_info}" # No additional escaping here
+            f"\\-\\-\\-\\n" # Explicitly escape '---' to be literal text, not a Markdown rule
         )
     await update.message.reply_markdown_v2(message)
 
@@ -241,7 +260,7 @@ async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # Check for admin code as the second argument
         if len(args) == 2 and args[1] == ADMIN_CODE:
             is_admin = True
-        
+            
         initial_len = len(alerts)
         
         # Filter alerts based on admin status or user_id
@@ -500,7 +519,8 @@ async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                                     f"Precio Actual: {current_price} (Objetivo: {target_price})\n"
                                     f"Última actualización: {item_datetime.strftime('%Y-%m-%d %H:%M:%S')}"
                                 )
-                                await context.bot.send_message(chat_id=user_id, text=message)
+                                # Ensure the alert message is also MarkdownV2 safe
+                                await context.bot.send_message(chat_id=user_id, text=escape_markdown_v2(message))
 
                                 # Actualizar el datetime de la última alerta
                                 last_alerted_datetimes[alert_key] = item_datetime_str
@@ -509,13 +529,10 @@ async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                                 break # Una alerta por cada recurso que cumpla la condición es suficiente
 
                 if not alert_sent and alert_key in last_alerted_datetimes:
-                    # Si ya no se cumple la condición de alerta, borrar el datetime para que pueda alertar de nuevo
-                    # si el precio vuelve a bajar o el datetime cambia.
-                    # Esto evita alertas repetitivas cuando el precio se mantiene bajo pero el datetime no cambia.
-                    # Sin embargo, la lógica del problema indica "si el datetime cambia Y el price sigue igual o menor, volver a dar la alerta"
-                    # Esto ya se maneja con `item_datetime > last_alert_datetime`.
-                    # Este bloque podría ser para resetear si la condición deja de cumplirse, pero no es explícitamente pedido así.
-                    pass
+                    # If the alert condition is no longer met, or the item_datetime has not updated
+                    # and the price is still below the target, we don't want to spam.
+                    # The current logic correctly handles not re-alerting if datetime hasn't changed.
+                    pass # This block is fine as is, no change needed.
 
     except httpx.HTTPStatusError as e:
         logger.error(f"Error HTTP al verificar precios: {e}")
