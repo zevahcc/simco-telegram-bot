@@ -64,15 +64,14 @@ def save_last_alerted_datetimes(datetimes):
 alerts = load_alerts()
 last_alerted_datetimes = load_last_alerted_datetimes()
 
-# --- Helper function for MarkdownV2 escaping ---
+# --- Helper function for MarkdownV2 escaping (used only where truly needed) ---
 def escape_markdown_v2(text: str) -> str:
-    """Escapa caracteres especiales para Telegram MarkdownV2."""
-    # Lista de caracteres especiales que necesitan ser escapados en MarkdownV2
-    # https://core.telegram.org/bots/api#formatting-options
-    escape_chars = r'_*[]()~`>#+-=|{}.!'
-    # Crear una tabla de traducción para el método str.translate
-    translator = str.maketrans({char: '\\' + char for char in escape_chars})
+    """Escapa caracteres especiales para Telegram MarkdownV2 que podrían romper el formato."""
+    # This is the full set Telegram states needs escaping.
+    escape_chars_strict = r'_*[]()~`>#+-=|{}.!' 
+    translator = str.maketrans({char: '\\' + char for char in escape_chars_strict})
     return text.translate(translator)
+
 
 # --- Comandos del Bot ---
 
@@ -93,6 +92,10 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "\\- \\`resourceId\\`: El ID del recurso \\(número entero\\)\\.\n"
         "\\- \\`quality\\` \\(opcional\\): La calidad mínima del recurso \\(0\\-12\\)\\.\n"
         "\\- \\`name\\` \\(opcional\\): Un nombre para tu alerta\\.\n\n"
+        "**/edit \\<id\\> \\<campo\\> \\<nuevo_valor\\>**\n"
+        "\\- Edita una alerta existente por su ID\\.\n"
+        "\\- \\`campo\\`: `target_price`, `quality` o `name`\\.\n"
+        "\\- \\`nuevo_valor\\`: El nuevo valor para el campo\\.\n\n"
         "**/status**\n"
         "\\- Muestra el estado actual del bot\\.\n\n"
         "**/alerts \\[admin_code\\]**\n"
@@ -101,6 +104,9 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "**/delete \\<id\\> \\[admin_code\\]**\n"
         "\\- Elimina una alerta por su ID\\.\n"
         "\\- Si eres administrador y usas el `admin_code`, puedes eliminar la alerta de cualquier usuario\\.\n\n"
+        "**/deleteall \\[admin_code\\] \\[user_id\\]**\n"
+        "\\- \\(Solo Admin\\) Elimina todas las alertas del bot\\.\n"
+        "\\- Si se proporciona un `user_id`, elimina todas las alertas de ese usuario\\.\n\n"
         "**/price \\<resourceId\\> \\[quality\\]**\n"
         "\\- Muestra el precio actual del mercado para un recurso\\.\n\n"
         "**/resource \\<resourceId\\> \\[quality\\]**\n"
@@ -177,6 +183,74 @@ async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error al crear alerta: {e}")
         await update.message.reply_text("Ocurrió un error al crear la alerta.")
 
+async def edit_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Edita una alerta existente.
+    Uso: /edit <id> <campo> <nuevo_valor>
+    Campos posibles: target_price, quality, name
+    """
+    global alerts
+    global last_alerted_datetimes
+
+    args = context.args
+    if not args or len(args) < 3:
+        await update.message.reply_text(
+            "Uso incorrecto. Ejemplo: `/edit 1 target_price 0.45` o `/edit 2 name MiNuevaAlerta`"
+        )
+        return
+
+    try:
+        alert_id_to_edit = int(args[0])
+        field_to_edit = args[1].lower()
+        new_value = " ".join(args[2:])
+        user_id = update.effective_user.id
+
+        found_alert = None
+        for alert_data in alerts:
+            if alert_data['id'] == alert_id_to_edit and alert_data['user_id'] == user_id:
+                found_alert = alert_data
+                break
+
+        if not found_alert:
+            await update.message.reply_text(f"No se encontró una alerta con ID {alert_id_to_edit} o no tienes permiso para editarla.")
+            return
+
+        original_value = found_alert.get(field_to_edit, 'N/A')
+
+        if field_to_edit == "target_price":
+            try:
+                found_alert['target_price'] = float(new_value)
+                message = f"Precio objetivo de la alerta ID {alert_id_to_edit} actualizado de {original_value} a {found_alert['target_price']}."
+            except ValueError:
+                await update.message.reply_text("El precio objetivo debe ser un número válido.")
+                return
+        elif field_to_edit == "quality":
+            try:
+                new_quality = int(new_value)
+                if not (0 <= new_quality <= 12):
+                    await update.message.reply_text("La calidad debe estar entre 0 y 12.")
+                    return
+                found_alert['quality'] = new_quality
+                message = f"Calidad de la alerta ID {alert_id_to_edit} actualizada de {original_value} a {found_alert['quality']}."
+            except ValueError:
+                await update.message.reply_text("La calidad debe ser un número entero válido.")
+                return
+        elif field_to_edit == "name":
+            found_alert['name'] = new_value
+            message = f"Nombre de la alerta ID {alert_id_to_edit} actualizado de '{original_value}' a '{found_alert['name']}'."
+        else:
+            await update.message.reply_text(f"Campo '{field_to_edit}' no válido para editar. Los campos posibles son: `target_price`, `quality`, `name`.")
+            return
+        
+        save_alerts(alerts)
+        await update.message.reply_text(f"✅ {message}")
+
+    except ValueError as e:
+        await update.message.reply_text(f"Error en los parámetros: {e}")
+    except Exception as e:
+        logger.error(f"Error al editar alerta: {e}")
+        await update.message.reply_text("Ocurrió un error al editar la alerta.")
+
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Muestra el estado actual del bot."""
     num_alerts = len(alerts)
@@ -214,16 +288,18 @@ async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     message = escape_markdown_v2(message_title)
     for alert_data in alerts_to_show:
         quality_info = f"Quality >= {alert_data['quality']}" if alert_data['quality'] is not None else "Todas las calidades"
-        # User ID info is already inside backticks, so it's treated as literal code,
-        # no further escaping needed for its content.
         user_id_info = f"User ID: `{alert_data['user_id']}`\n" if is_admin else ""
 
-        # Escape individual components that might contain special MarkdownV2 characters
-        alert_id_str = str(alert_data['id']) # ID is an integer, usually no special chars
-        name_str = escape_markdown_v2(str(alert_data['name'])) # Name can be user-defined, needs escaping
-        resource_id_str = str(alert_data['resource_id']) # Resource ID is an integer
-        target_price_str = escape_markdown_v2(f"{alert_data['target_price']:.3f}") # Price is float, needs escaping
-        quality_info_str = escape_markdown_v2(quality_info) # Quality info string might contain special chars
+        # Escape only the alert name as it's user-provided text
+        name_str = escape_markdown_v2(str(alert_data['name']))
+
+        # For numbers and standard strings, direct formatting is usually fine for MarkdownV2
+        # unless they contain literal Markdown syntax characters.
+        # Periods in floats and hyphens in dates are generally fine.
+        alert_id_str = str(alert_data['id'])
+        resource_id_str = str(alert_data['resource_id'])
+        target_price_str = f"{alert_data['target_price']:.3f}" # No extra escaping here
+        quality_info_str = quality_info # No extra escaping here
 
         message += (
             f"ID: {alert_id_str}\n"
@@ -231,7 +307,7 @@ async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             f"Resource ID: {resource_id_str}\n"
             f"Precio Objetivo: {target_price_str}\n"
             f"{quality_info_str}\n"
-            f"{user_id_info}" # No additional escaping here
+            f"{user_id_info}"
             f"\\-\\-\\-\\n" # Explicitly escape '---' to be literal text, not a Markdown rule
         )
     await update.message.reply_markdown_v2(message)
@@ -295,6 +371,89 @@ async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception as e:
         logger.error(f"Error al eliminar alerta: {e}")
         await update.message.reply_text("Ocurrió un error al eliminar la alerta.")
+
+async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    (Solo Admin) Elimina todas las alertas del bot o todas las alertas de un usuario específico.
+    Uso: /deleteall [admin_code] [user_id]
+    """
+    global alerts
+    global last_alerted_datetimes
+
+    args = context.args
+    
+    if not args or len(args) < 1 or args[0] != ADMIN_CODE:
+        await update.message.reply_text("Permiso denegado. Solo los administradores con el código correcto pueden usar este comando.")
+        return
+    
+    is_admin = True # We already checked ADMIN_CODE
+
+    try:
+        user_id_to_delete_alerts_for = None
+        if len(args) == 2:
+            try:
+                user_id_to_delete_alerts_for = int(args[1])
+            except ValueError:
+                await update.message.reply_text("El ID de usuario debe ser un número entero válido.")
+                return
+
+        initial_len = len(alerts)
+        deleted_count = 0
+        deleted_alert_ids = set()
+
+        if user_id_to_delete_alerts_for is not None:
+            # Delete alerts for a specific user
+            original_alerts_len = len(alerts)
+            alerts[:] = [
+                alert_data for alert_data in alerts
+                if alert_data['user_id'] != user_id_to_delete_alerts_for
+            ]
+            deleted_count = original_alerts_len - len(alerts)
+            for alert_data in alerts: # Find IDs of deleted alerts
+                if alert_data['user_id'] == user_id_to_delete_alerts_for:
+                    deleted_alert_ids.add(alert_data['id'])
+            
+            message_suffix = f" para el usuario ID {user_id_to_delete_alerts_for}"
+        else:
+            # Delete all alerts
+            deleted_count = len(alerts)
+            deleted_alert_ids.update(alert['id'] for alert in alerts)
+            alerts.clear()
+            message_suffix = " del bot"
+        
+        if deleted_count > 0:
+            save_alerts(alerts)
+            
+            # Clear associated last_alerted_datetimes
+            keys_to_remove = []
+            for key in last_alerted_datetimes:
+                # Key format: "user_id-alert_id"
+                parts = key.split('-')
+                if len(parts) == 2:
+                    try:
+                        alert_id_in_key = int(parts[1])
+                        if alert_id_in_key in deleted_alert_ids or user_id_to_delete_alerts_for is None:
+                            keys_to_remove.append(key)
+                        elif user_id_to_delete_alerts_for is not None and int(parts[0]) == user_id_to_delete_alerts_for:
+                             keys_to_remove.append(key)
+                    except ValueError:
+                        # Handle malformed keys if any
+                        pass
+            for key in keys_to_remove:
+                del last_alerted_datetimes[key]
+            save_last_alerted_datetimes(last_alerted_datetimes)
+
+            await update.message.reply_text(f"✅ Se eliminaron {deleted_count} alerta(s){message_suffix}.")
+        else:
+            if user_id_to_delete_alerts_for:
+                await update.message.reply_text(f"No se encontraron alertas para el usuario ID {user_id_to_delete_alerts_for}.")
+            else:
+                await update.message.reply_text("No hay alertas activas en el bot para eliminar.")
+
+    except Exception as e:
+        logger.error(f"Error al eliminar todas las alertas: {e}", exc_info=True)
+        await update.message.reply_text("Ocurrió un error al intentar eliminar las alertas.")
+
 
 async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -425,7 +584,9 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                         volume_str = f"{volume:,}" if isinstance(volume, (int, float)) else str(volume)
                         vwap_str = f"{vwap:.3f}" if isinstance(vwap, (int, float)) else str(vwap)
 
-                        # Escapar los caracteres especiales para MarkdownV2
+                        # Escapar solo los caracteres que Telegram MarkdownV2 podría interpretar como sintaxis
+                        # Los puntos y guiones en números y fechas no necesitan ser escapados aquí
+                        # porque están dentro de un contexto de texto normal.
                         message += (
                             f"  Apertura: `{open_str}`\n"
                             f"  Mínimo: `{low_str}`\n"
@@ -433,7 +594,7 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                             f"  Cierre: `{close_str}`\n"
                             f"  Volumen: `{volume_str}`\n"
                             f"  VWAP: `{vwap_str}`\n"
-                        ).replace('.', '\\.').replace('-', '\\-').replace(',', '\\,')
+                        ).replace('.', '\\.').replace('-', '\\-').replace(',', '\\,') # Re-applying specific escapes here for safety.
 
 
                     else:
@@ -519,8 +680,8 @@ async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                                     f"Precio Actual: {current_price} (Objetivo: {target_price})\n"
                                     f"Última actualización: {item_datetime.strftime('%Y-%m-%d %H:%M:%S')}"
                                 )
-                                # Ensure the alert message is also MarkdownV2 safe
-                                await context.bot.send_message(chat_id=user_id, text=escape_markdown_v2(message))
+                                # Send as plain text. No MarkdownV2 escaping needed for send_message.
+                                await context.bot.send_message(chat_id=user_id, text=message)
 
                                 # Actualizar el datetime de la última alerta
                                 last_alerted_datetimes[alert_key] = item_datetime_str
@@ -529,10 +690,7 @@ async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                                 break # Una alerta por cada recurso que cumpla la condición es suficiente
 
                 if not alert_sent and alert_key in last_alerted_datetimes:
-                    # If the alert condition is no longer met, or the item_datetime has not updated
-                    # and the price is still below the target, we don't want to spam.
-                    # The current logic correctly handles not re-alerting if datetime hasn't changed.
-                    pass # This block is fine as is, no change needed.
+                    pass
 
     except httpx.HTTPStatusError as e:
         logger.error(f"Error HTTP al verificar precios: {e}")
@@ -547,9 +705,11 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help))
     application.add_handler(CommandHandler("alert", alert))
+    application.add_handler(CommandHandler("edit", edit_alert)) # Nuevo manejador
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("alerts", show_alerts))
     application.add_handler(CommandHandler("delete", delete_alert))
+    application.add_handler(CommandHandler("deleteall", delete_all_alerts)) # Nuevo manejador
     application.add_handler(CommandHandler("price", get_price))
     application.add_handler(CommandHandler("resource", get_resource_info))
 
@@ -564,3 +724,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
