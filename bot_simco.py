@@ -134,20 +134,24 @@ async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         quality = None
         name = None
 
-        if len(args) > 2:
+        remaining_args = args[2:] # Obtener todos los argumentos después de resourceId
+
+        if remaining_args:
+            # Intentar analizar el primer argumento restante como calidad
             try:
-                quality = int(args[2])
-                if not (0 <= quality <= 12):
+                potential_quality = int(remaining_args[0])
+                if 0 <= potential_quality <= 12:
+                    quality = potential_quality
+                    # Si era una calidad válida, el resto es el nombre
+                    if len(remaining_args) > 1:
+                        name = " ".join(remaining_args[1:])
+                else:
+                    # Si es un entero pero fuera de rango, generar un error explícito
                     raise ValueError("La calidad debe estar entre 0 y 12.")
             except ValueError:
-                # Si el tercer argumento no es un número, asúmelo como nombre
-                name = args[2]
-                if len(args) > 3:
-                    name = " ".join(args[2:])
-            else:
-                # Si el tercer argumento es un número, el cuarto sería el nombre
-                if len(args) > 3:
-                    name = " ".join(args[3:])
+                # Si remaining_args[0] no se puede convertir a int (o si la calidad estaba fuera de rango
+                # y se relanzó ValueError), entonces este argumento (y el resto) es el nombre
+                name = " ".join(remaining_args)
 
         # Asignar un ID único a la alerta
         alert_id = 1
@@ -180,7 +184,7 @@ async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except ValueError as e:
         await update.message.reply_text(f"Error en los parámetros: {e}")
     except Exception as e:
-        logger.error(f"Error al crear alerta: {e}")
+        logger.error(f"Error al crear alerta: {e}", exc_info=True) # Añadido exc_info
         await update.message.reply_text("Ocurrió un error al crear la alerta.")
 
 async def edit_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -284,33 +288,31 @@ async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text("No tienes alertas activas.")
         return
 
-    # Escape the title as well, just in case it contains special markdown characters
-    message = escape_markdown_v2(message_title)
-    for alert_data in alerts_to_show:
-        quality_info = f"Quality >= {alert_data['quality']}" if alert_data['quality'] is not None else "Todas las calidades"
-        user_id_info = f"User ID: `{alert_data['user_id']}`\n" if is_admin else ""
+    try: # Added try-except for this function as well
+        # Escape the title as well, just in case it contains special markdown characters
+        message = escape_markdown_v2(message_title)
+        for alert_data in alerts_to_show:
+            quality_info = f"Quality >= {alert_data['quality']}" if alert_data['quality'] is not None else "Todas las calidades"
+            user_id_info = f"User ID: `{alert_data['user_id']}`\n" if is_admin else ""
 
-        # Escape only the alert name as it's user-provided text
-        name_str = escape_markdown_v2(str(alert_data['name']))
+            # Escape specific parts for MarkdownV2
+            name_str = escape_markdown_v2(str(alert_data['name'])) # User-provided name
+            target_price_str = escape_markdown_v2(f"{alert_data['target_price']:.3f}") # Price value
+            quality_info_str = escape_markdown_v2(quality_info) # Quality text, could have '>'
 
-        # For numbers and standard strings, direct formatting is usually fine for MarkdownV2
-        # unless they contain literal Markdown syntax characters.
-        # Periods in floats and hyphens in dates are generally fine.
-        alert_id_str = str(alert_data['id'])
-        resource_id_str = str(alert_data['resource_id'])
-        target_price_str = f"{alert_data['target_price']:.3f}" # No extra escaping here
-        quality_info_str = quality_info # No extra escaping here
-
-        message += (
-            f"ID: {alert_id_str}\n"
-            f"Nombre: {name_str}\n"
-            f"Resource ID: {resource_id_str}\n"
-            f"Precio Objetivo: {target_price_str}\n"
-            f"{quality_info_str}\n"
-            f"{user_id_info}"
-            f"\\-\\-\\-\\n" # Explicitly escape '---' to be literal text, not a Markdown rule
-        )
-    await update.message.reply_markdown_v2(message)
+            message += (
+                f"ID: {alert_data['id']}\n" # ID is an integer, usually fine
+                f"Nombre: {name_str}\n"
+                f"Resource ID: {alert_data['resource_id']}\n" # Resource ID is an integer, usually fine
+                f"Precio Objetivo: {target_price_str}\n"
+                f"{quality_info_str}\n"
+                f"{user_id_info}"
+                f"\\-\\-\\-\\n" # Explicitly escape '---' to be literal text, not a Markdown rule
+            )
+        await update.message.reply_markdown_v2(message)
+    except Exception as e:
+        logger.error(f"Error al mostrar alertas: {e}", exc_info=True)
+        await update.message.reply_text("Ocurrió un error al intentar mostrar las alertas.")
 
 
 async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
