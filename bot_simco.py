@@ -598,7 +598,7 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             summaries_by_quality = data['resource']['summariesByQuality']
 
             # Escapar los paréntesis en el mensaje inicial
-            message = f"📊 Información del Recurso: *{resource_name}* \\(ID: `{resource_id}`\\)\n"
+            message = f"📊 Información del Recurso: *{escape_markdown_v2(resource_name)}* \\(ID: `{resource_id}`\\)\n"
             if quality_filter is not None:
                 message += f"Para Calidad: `{quality_filter}`\n\n"
             else:
@@ -695,9 +695,10 @@ async def find_resource_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     matches = search_resources_by_query(search_query)
 
     if matches:
-        message = f"Coincidencias encontradas para '{search_query}':\n\n"
+        message = f"Coincidencias encontradas para '{escape_markdown_v2(search_query)}':\n\n" # Escape the search query itself
         for name, resource_id in matches:
-            message += f"- *{escape_markdown_v2(name)}* \\(ID: `{resource_id}`\\)\n"
+            # Escape the leading hyphen for list items, then escape name and ID for markdown
+            message += f"\\- *{escape_markdown_v2(name)}* \\(ID: `{resource_id}`\\)\n" 
         
         # Limitar el número de resultados para evitar mensajes muy largos en Telegram
         if len(matches) > 10: # Si hay más de 10 coincidencias
