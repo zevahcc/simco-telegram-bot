@@ -11,6 +11,7 @@ from telegram.ext import (
     JobQueue
 )
 import httpx
+from unidecode import unidecode # Importar la librería para manejar tildes
 
 # Configuración de Logging
 logging.basicConfig(
@@ -31,6 +32,10 @@ API_URL = "https://api.simcotools.com/v1/realms/0/market/prices"
 RESOURCE_API_BASE_URL = "https://api.simcotools.com/v1/realms/0/market/resources/"
 ALERTS_FILE = "alerts.json"
 LAST_ALERTED_DATETIMES_FILE = "last_alerted_datetimes.json"
+STATIC_RESOURCES_FILE = "recursos_estaticos.json" # Archivo JSON con la lista estática
+
+# Diccionario para almacenar los recursos estáticos (nombre -> ID)
+STATIC_RESOURCES = {}
 
 # --- Funciones de Utilidad para Persistencia ---
 
@@ -60,18 +65,57 @@ def save_last_alerted_datetimes(datetimes):
     with open(LAST_ALERTED_DATETIMES_FILE, 'w') as f:
         json.dump(datetimes, f, indent=4)
 
+def load_static_resources():
+    """
+    Carga los recursos estáticos desde el archivo JSON.
+    Se espera que el JSON sea un diccionario { "Nombre del Recurso": ID }.
+    """
+    global STATIC_RESOURCES
+    try:
+        if not os.path.exists(STATIC_RESOURCES_FILE):
+            logger.warning(f"Archivo de recursos estáticos '{STATIC_RESOURCES_FILE}' no encontrado. Las búsquedas de nombres no funcionarán.")
+            return
+
+        with open(STATIC_RESOURCES_FILE, 'r', encoding='utf-8') as f:
+            STATIC_RESOURCES = json.load(f)
+        logger.info(f"Recursos estáticos cargados exitosamente desde {STATIC_RESOURCES_FILE}.")
+    except json.JSONDecodeError:
+        logger.error(f"Error al decodificar JSON en '{STATIC_RESOURCES_FILE}'. Asegúrate de que el formato sea correcto.")
+        STATIC_RESOURCES = {} # Reset to empty to prevent issues
+    except Exception as e:
+        logger.error(f"Error inesperado al cargar recursos estáticos: {e}", exc_info=True)
+        STATIC_RESOURCES = {} # Reset to empty to prevent issues
+
+
 # Cargar alertas y datetimes al iniciar el bot
 alerts = load_alerts()
 last_alerted_datetimes = load_last_alerted_datetimes()
+load_static_resources() # Cargar los recursos estáticos al inicio del bot
 
 # --- Helper function for MarkdownV2 escaping (used only where truly needed) ---
 def escape_markdown_v2(text: str) -> str:
     """Escapa caracteres especiales para Telegram MarkdownV2 que podrían romper el formato."""
-    # This is the full set Telegram states needs escaping.
     escape_chars_strict = r'_*[]()~`>#+-=|{}.!' 
     translator = str.maketrans({char: '\\' + char for char in escape_chars_strict})
     return text.translate(translator)
 
+# --- Nueva función de búsqueda de recursos ---
+def search_resources_by_query(query: str) -> list[tuple[str, int]]:
+    """
+    Busca recursos en STATIC_RESOURCES por una cadena de consulta.
+    Ignora mayúsculas/minúsculas y tildes.
+    Retorna una lista de tuplas (nombre, id) de las coincidencias.
+    """
+    matches = []
+    # Normaliza la consulta de búsqueda: a minúsculas y sin tildes
+    normalized_query = unidecode(query).lower()
+
+    for name, resource_id in STATIC_RESOURCES.items():
+        # Normaliza el nombre del recurso de la lista: a minúsculas y sin tildes
+        normalized_name = unidecode(name).lower()
+        if normalized_query in normalized_name:
+            matches.append((name, resource_id))
+    return matches
 
 # --- Comandos del Bot ---
 
@@ -111,6 +155,8 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "\\- Muestra el precio actual del mercado para un recurso\\.\n\n"
         "**/resource \\<resourceId\\> \\[quality\\]**\n"
         "\\- Muestra información detallada sobre un recurso y sus precios del último día\\.\n\n"
+        "**/findid \\<nombre_del_recurso\\>**\n"
+        "\\- Busca el ID de un recurso por su nombre \\(mínimo 3 letras, insensible a mayúsculas/tildes\\)\\.\n\n"
         "**/help**\n"
         "\\- Muestra esta ayuda\\."
     )
@@ -624,11 +670,50 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         logger.error(f"Error inesperado al obtener información del recurso: {e}", exc_info=True)
         await update.message.reply_text("Ocurrió un error inesperado al obtener la información del recurso. Por favor, inténtalo de nuevo más tarde.")
 
+async def find_resource_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Busca el ID de un recurso por su nombre.
+    Uso: /findid <nombre_del_recurso>
+    Requiere al menos 3 letras, ignora mayúsculas/minúsculas y tildes.
+    """
+    args = context.args
+    if not args:
+        await update.message.reply_text("Uso: `/findid <nombre_del_recurso>`\nPor favor, ingresa al menos 3 letras del nombre del recurso.")
+        return
+
+    search_query = " ".join(args)
+    
+    # MODIFICACIÓN AQUÍ: Cambiado de 4 a 3
+    if len(search_query) < 3:
+        await update.message.reply_text("Por favor, ingresa al menos 3 letras para la búsqueda del recurso.")
+        return
+
+    if not STATIC_RESOURCES:
+        await update.message.reply_text("Lo siento, la lista de recursos estáticos no está disponible. Por favor, informa al administrador del bot.")
+        return
+
+    matches = search_resources_by_query(search_query)
+
+    if matches:
+        message = f"Coincidencias encontradas para '{search_query}':\n\n"
+        for name, resource_id in matches:
+            message += f"- *{escape_markdown_v2(name)}* \\(ID: `{resource_id}`\\)\n"
+        
+        # Limitar el número de resultados para evitar mensajes muy largos en Telegram
+        if len(matches) > 10: # Si hay más de 10 coincidencias
+            message += escape_markdown_v2(f"\nSe encontraron {len(matches)} coincidencias. Mostrando las primeras 10. Por favor, sé más específico.")
+            message_parts = message.split('\n')
+            message = '\n'.join(message_parts[:13]) # Limita a las primeras 10 entradas de la lista + encabezados
+
+        await update.message.reply_markdown_v2(message)
+    else:
+        await update.message.reply_text(f"No se encontraron recursos que coincidan con '{search_query}'.")
+
 
 # --- Lógica de Verificación de Alertas (Job del Bot) ---
 
 async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Función que se ejecuta cada 60 segundos para verificar los precios."""
+    """Función que se ejecuta cada 30 segundos para verificar los precios."""
     logger.info("Iniciando verificación de precios...")
     if not alerts:
         logger.info("No hay alertas activas para verificar.")
@@ -714,11 +799,13 @@ def main() -> None:
     application.add_handler(CommandHandler("deleteall", delete_all_alerts)) # Nuevo manejador
     application.add_handler(CommandHandler("price", get_price))
     application.add_handler(CommandHandler("resource", get_resource_info))
+    application.add_handler(CommandHandler("findid", find_resource_id)) # Nuevo manejador para buscar ID
 
 
     # Configurar el Job Queue para la verificación de precios
     job_queue: JobQueue = application.job_queue
-    job_queue.run_repeating(check_prices_job, interval=60, first=10) # Se ejecuta cada 60 segundos, empieza después de 10 segundos
+    # MODIFICACIÓN AQUÍ: Cambiado de 60 a 30 segundos
+    job_queue.run_repeating(check_prices_job, interval=30, first=10) # Se ejecuta cada 30 segundos, empieza después de 10 segundos
 
     # Iniciar el bot
     logger.info("Bot de SimcoTools iniciado...")
@@ -726,4 +813,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
