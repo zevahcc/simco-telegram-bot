@@ -165,6 +165,7 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "**/help**\n"
         f"\\- Muestra esta ayuda."
     )
+    # MODIFICACIÓN: help_message ya está pre-formateado para MarkdownV2, no necesita escape adicional.
     await update.message.reply_markdown_v2(help_message)
 
 async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -186,6 +187,7 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"\\- Si se proporciona solo el admin_code: Elimina **todas las alertas del bot** incluyendo las de todos los usuarios\n"
         f"\\- Si se proporciona el admin_code y un user_id: Elimina todas las alertas de ese user_id específico."
     )
+    # MODIFICACIÓN: admin_help_message ya está pre-formateado para MarkdownV2, no necesita escape adicional.
     await update.message.reply_markdown_v2(admin_help_message)
 
 async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -362,7 +364,10 @@ async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     try: # Added try-except for this function as well
         # Escape the title as well, just in case it contains special markdown characters
-        message = escape_markdown_v2(message_title)
+        # Note: If message_title is purely static and contains intended Markdown, it should NOT be escaped.
+        # However, if it might dynamically receive content or contains special chars like ( ) that need literal display, then escape.
+        # For now, keeping as is, focusing on help/admin_help.
+        message = escape_markdown_v2(message_title) 
         for alert_data in alerts_to_show:
             quality_info = f"Quality >= {alert_data['quality']}" if alert_data['quality'] is not None else "Todas las calidades"
             user_id_info = f"User ID: `{alert_data['user_id']}`\n" if is_admin else ""
