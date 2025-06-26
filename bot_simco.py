@@ -476,98 +476,100 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """
     global alerts
     global last_alerted_datetimes
-
-    args = context.args
-    user_id = update.effective_user.id
     
-    is_admin_request = False
-    target_user_id_for_admin = None
+    try: # <--- Start of the try block
+
+        args = context.args
+        user_id = update.effective_user.id
+    
+        is_admin_request = False
+        target_user_id_for_admin = None
 
     # Determine if it's an admin request and if a specific user_id is targeted
-    if args and args[0] == ADMIN_CODE:
-        is_admin_request = True
-        if len(args) == 2:
-            try:
-                target_user_id_for_admin = int(args[1])
-            except ValueError:
-                await update.message.reply_text("El ID de usuario para eliminar debe ser un número entero válido.")
-                return
-    elif args: # Arguments provided but not ADMIN_CODE first
-        await update.message.reply_text("Permiso denegado. Solo los administradores con el código correcto pueden usar argumentos con este comando.")
-        return
+        if args and args[0] == ADMIN_CODE:
+            is_admin_request = True
+            if len(args) == 2:
+                try:
+                    target_user_id_for_admin = int(args[1])
+                except ValueError:
+                    await update.message.reply_text("El ID de usuario para eliminar debe ser un número entero válido.")
+                    return
+        elif args: # Arguments provided but not ADMIN_CODE first
+            await update.message.reply_text("Permiso denegado. Solo los administradores con el código correcto pueden usar argumentos con este comando.")
+            return
     
     # Logic for deletion
-    deleted_count = 0
-    deleted_alert_ids = set() # To track IDs of alerts actually deleted
-    initial_alerts_state = list(alerts) # Create a copy to work with
+        deleted_count = 0
+        deleted_alert_ids = set() # To track IDs of alerts actually deleted
+        initial_alerts_state = list(alerts) # Create a copy to work with
 
-    if is_admin_request:
-        if target_user_id_for_admin is not None:
+        if is_admin_request:
+            if target_user_id_for_admin is not None:
             # Admin deletes all alerts for a specific user_id
             # Corrected logic to ensure only target_user_id's alerts are removed
+                alerts[:] = [
+                    alert_data for alert_data in initial_alerts_state
+                    if alert_data['user_id'] != target_user_id_for_admin
+                ]
+                deleted_count = len(initial_alerts_state) - len(alerts) # Calculate count correctly
+                deleted_alert_ids.update(
+                    a['id'] for a in initial_alerts_state
+                    if a['user_id'] == target_user_id_for_admin
+                )
+                message_suffix = f" para el usuario ID {target_user_id_for_admin}"
+            else:
+            # Admin deletes ALL alerts in the bot
+                deleted_count = len(alerts)
+                deleted_alert_ids.update(alert['id'] for alert in alerts)
+                alerts.clear()
+                message_suffix = " del bot (todas las alertas)."
+        else: # Normal user, no arguments or just /deleteall
+        # User deletes their own alerts
             alerts[:] = [
                 alert_data for alert_data in initial_alerts_state
-                if alert_data['user_id'] != target_user_id_for_admin
+                if alert_data['user_id'] != user_id
             ]
             deleted_count = len(initial_alerts_state) - len(alerts) # Calculate count correctly
             deleted_alert_ids.update(
                 a['id'] for a in initial_alerts_state
-                if a['user_id'] == target_user_id_for_admin
+                if a['user_id'] == user_id
             )
-            message_suffix = f" para el usuario ID {target_user_id_for_admin}"
-        else:
-            # Admin deletes ALL alerts in the bot
-            deleted_count = len(alerts)
-            deleted_alert_ids.update(alert['id'] for alert in alerts)
-            alerts.clear()
-            message_suffix = " del bot (todas las alertas)."
-    else: # Normal user, no arguments or just /deleteall
-        # User deletes their own alerts
-        alerts[:] = [
-            alert_data for alert_data in initial_alerts_state
-            if alert_data['user_id'] != user_id
-        ]
-        deleted_count = len(initial_alerts_state) - len(alerts) # Calculate count correctly
-        deleted_alert_ids.update(
-            a['id'] for a in initial_alerts_state
-            if a['user_id'] == user_id
-        )
-        message_suffix = " tuyas."
+            message_suffix = " tuyas."
 
-    if deleted_count > 0:
-        save_alerts(alerts)
+        if deleted_count > 0:
+            save_alerts(alerts)
         
         # Limpiar last_alerted_datetimes para las alertas eliminadas
-        keys_to_remove = []
-        for key in last_alerted_datetimes:
-            parts = key.split('-')
-            if len(parts) == 2:
-                try:
-                    alert_user_id = int(parts[0])
-                    alert_id_in_key = int(parts[1])
+            keys_to_remove = []
+            for key in last_alerted_datetimes:
+                parts = key.split('-')
+                if len(parts) == 2:
+                    try:
+                        alert_user_id = int(parts[0])
+                        alert_id_in_key = int(parts[1])
                     
-                    if alert_id_in_key in deleted_alert_ids: # If the alert ID was specifically deleted
-                        keys_to_remove.append(key)
-                    elif not is_admin_request and alert_user_id == user_id: # Non-admin deleted their own
-                         keys_to_remove.append(key)
-                    elif is_admin_request and target_user_id_for_admin is not None and alert_user_id == target_user_id_for_admin: # Admin deleted specific user's
-                        keys_to_remove.append(key)
-                    elif is_admin_request and target_user_id_for_admin is None: # Admin deleted ALL alerts
-                        keys_to_remove.append(key)
-                except ValueError:
-                    pass # Ignorar claves mal formadas
-        for key in keys_to_remove:
-            del last_alerted_datetimes[key]
-        save_last_alerted_datetimes(last_alerted_datetimes)
+                        if alert_id_in_key in deleted_alert_ids: # If the alert ID was specifically deleted
+                            keys_to_remove.append(key)
+                        elif not is_admin_request and alert_user_id == user_id: # Non-admin deleted their own
+                             keys_to_remove.append(key)
+                        elif is_admin_request and target_user_id_for_admin is not None and alert_user_id == target_user_id_for_admin: # Admin deleted specific user's
+                            keys_to_remove.append(key)
+                        elif is_admin_request and target_user_id_for_admin is None: # Admin deleted ALL alerts
+                            keys_to_remove.append(key)
+                     except ValueError:
+                        pass # Ignorar claves mal formadas
+            for key in keys_to_remove:
+                del last_alerted_datetimes[key]
+            save_last_alerted_datetimes(last_alerted_datetimes)
 
-        await update.message.reply_text(f"✅ Se eliminaron {deleted_count} alerta(s){message_suffix}.")
-    else:
-        if is_admin_request and target_user_id_for_admin:
-            await update.message.reply_text(f"No se encontraron alertas para el usuario ID {target_user_id_for_admin}.")
-        elif is_admin_request and not target_user_id_for_admin:
-            await update.message.reply_text("No hay alertas activas en el bot para eliminar.")
-        else: # Normal user
-            await update.message.reply_text("No tienes alertas activas para eliminar.")
+            await update.message.reply_text(f"✅ Se eliminaron {deleted_count} alerta(s){message_suffix}.")
+        else:
+            if is_admin_request and target_user_id_for_admin:
+                await update.message.reply_text(f"No se encontraron alertas para el usuario ID {target_user_id_for_admin}.")
+            elif is_admin_request and not target_user_id_for_admin:
+                await update.message.reply_text("No hay alertas activas en el bot para eliminar.")
+            else: # Normal user
+                await update.message.reply_text("No tienes alertas activas para eliminar.")
 
     except Exception as e:
         logger.error(f"Error al eliminar todas las alertas: {e}", exc_info=True)
