@@ -132,22 +132,23 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Comandos disponibles:\n"
         "**/alert \\<price objetivo\\> \\<resourceId\\> \\[quality\\] \\[name\\]**\n"
         "\\- Crea una nueva alerta de precio\\.\n"
-        "\\- \`price objetivo\`: El precio máximo al que deseas comprar\\.\n"
-        "\\- \`resourceId\`: El ID del recurso \\(número entero\\)\\.\n"
-        "\\- \`quality\` \\(opcional\\): La calidad mínima del recurso \\(0\\-12\\)\\.\n"
-        "\\- \`name\` \\(opcional\\): Un nombre para tu alerta\\.\n\n"
+        "\\- \`price objetivo\`\\: El precio máximo al que deseas comprar\\.\n" # Corrected escaping for colon
+        "\\- \`resourceId\`\\: El ID del recurso \\(número entero\\)\\.\n" # Corrected escaping for colon
+        "\\- \`quality\` \\(opcional\\)\\: La calidad mínima del recurso \\(0\\-12\\)\\.\n" # Corrected escaping for colon after parenthesis
+        "\\- \`name\` \\(opcional\\)\\: Un nombre para tu alerta\\.\n\n" # Corrected escaping for colon after parenthesis
         "**/edit \\<id\\> \\<campo\\> \\<nuevo_valor\\>**\n"
         "\\- Edita una alerta existente por su ID\\.\n"
-        "\\- \`campo\`: `target_price`, `quality` o `name`\\.\n"
-        "\\- \`nuevo_valor\`: El nuevo valor para el campo\\.\n\n"
+        "\\- \`campo\`\\: \`target_price\`\\, \`quality\` o \`name\`\\.\n" # Corrected escaping for colon and comma
+        "\\- \`nuevo_valor\`\\: El nuevo valor para el campo\\.\n\n" # Corrected escaping for colon
         "**/status**\n"
         "\\- Muestra el estado actual del bot\\.\n\n"
         "**/alerts \\[admin_code\\]**\n"
         "\\- Muestra todas tus alertas activas\\.\n"
-        "\\- Si eres administrador y usas el `admin_code`, muestra todas las alertas del bot\\.\n\n"
+        "\\- Si eres administrador y usas el \`admin_code\`\\, muestra todas las alertas del bot\\.\n\n" # Corrected escaping for comma
         "**/delete \\<id1\\> \\[id2 ... id5\\] \\[admin_code\\]**\n"
         "\\- Elimina una o varias alertas por sus IDs \\(hasta 5 a la vez\\)\\.\n"
-        "\\- Si eres administrador y usas el `admin_code` \\(como último argumento\\), puedes eliminar las alertas de cualquier usuario\\.\n\n"
+        "\\- Si eres administrador y usas el \`admin_code\` \\(como último argumento\\)\\," # Corrected comma after parenthesis
+        " puedes eliminar las alertas de cualquier usuario\\.\n\n"
         "**/deleteall \\[admin_code\\] \\[user_id\\]**\n"
         "\\- Elimina todas las alertas\\.\n"
         "\\- **Sin argumentos**: Elimina **todas tus propias** alertas \\(para usuarios normales\\)\\.\n"
@@ -177,11 +178,11 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "\\- Muestra **todas las alertas** activas del bot\\.\n\n"
         "**/delete \\<id1\\> \\[id2 ... id5\\] \\<admin_code\\>**\n"
         "\\- Elimina una o varias alertas por sus IDs \\(hasta 5 a la vez\\)\\.\n"
-        "\\- El `admin_code` debe ser el último argumento para eliminar alertas de *cualquier* usuario\\.\n\n"
+        "\\- El \`admin_code\` debe ser el último argumento para eliminar alertas de *cualquier* usuario\\.\n\n" # Ensured correct escaping
         "**/deleteall \\<admin_code\\> \\[user_id\\]**\n"
         "\\- Elimina todas las alertas del bot\\.\n"
-        "\\- Si se proporciona solo el `admin_code`: Elimina **todas las alertas del bot** \\(incluyendo las de todos los usuarios\\)\\.\n"
-        "\\- Si se proporciona el `admin_code` y un `user_id`: Elimina todas las alertas de ese `user_id` específico\\.\n"
+        "\\- Si se proporciona solo el \`admin_code\`\\: Elimina **todas las alertas del bot** \\(incluyendo las de todos los usuarios\\)\\.\n" # Corrected colon escaping
+        "\\- Si se proporciona el \`admin_code\` y un \`user_id\`\\: Elimina todas las alertas de ese \`user_id\` específico\\.\n" # Corrected colon escaping
     )
     await update.message.reply_markdown_v2(admin_help_message)
 
@@ -738,7 +739,7 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                         volume = last_day_candlestick.get('volume', 'N/A')
                         vwap = last_day_candlestick.get('vwap', 'N/A')
 
-                        # Formatear números solo si no son 'N/A'
+                        # Formatear números solo si no son 'N/A' y asegurar que no se escapen dentro de backticks
                         open_str = f"{open_price:.3f}" if isinstance(open_price, (int, float)) else str(open_price)
                         low_str = f"{low_price:.3f}" if isinstance(low_price, (int, float)) else str(low_price)
                         high_str = f"{high_price:.3f}" if isinstance(high_price, (int, float)) else str(high_price)
@@ -746,9 +747,6 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                         volume_str = f"{volume:,}" if isinstance(volume, (int, float)) else str(volume)
                         vwap_str = f"{vwap:.3f}" if isinstance(vwap, (int, float)) else str(vwap)
 
-                        # Escapar solo los caracteres que Telegram MarkdownV2 podría interpretar como sintaxis
-                        # Los puntos y guiones en números y fechas no necesitan ser escapados aquí
-                        # porque están dentro de un contexto de texto normal.
                         message += (
                             f"  Apertura: `{open_str}`\n"
                             f"  Mínimo: `{low_str}`\n"
@@ -756,7 +754,7 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                             f"  Cierre: `{close_str}`\n"
                             f"  Volumen: `{volume_str}`\n"
                             f"  VWAP: `{vwap_str}`\n"
-                        ).replace('.', '\\.').replace('-', '\\-').replace(',', '\\,') # Re-applying specific escapes here for safety.
+                        ) # Removed .replace() calls as values are inside backticks
 
 
                     else:
@@ -907,14 +905,14 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help))
     application.add_handler(CommandHandler("alert", alert))
-    application.add_handler(CommandHandler("edit", edit_alert)) # Nuevo manejador
+    application.add_handler(CommandHandler("edit", edit_alert))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("alerts", show_alerts))
     application.add_handler(CommandHandler("delete", delete_alert))
-    application.add_handler(CommandHandler("deleteall", delete_all_alerts)) # Nuevo manejador
+    application.add_handler(CommandHandler("deleteall", delete_all_alerts))
     application.add_handler(CommandHandler("price", get_price))
     application.add_handler(CommandHandler("resource", get_resource_info))
-    application.add_handler(CommandHandler("findid", find_resource_id)) # Nuevo manejador para buscar ID
+    application.add_handler(CommandHandler("findid", find_resource_id))
 
 
     # Configurar el Job Queue para la verificación de precios
