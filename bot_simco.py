@@ -534,42 +534,44 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         message_suffix = " tuyas."
 
-    if deleted_count > 0:
-        save_alerts(alerts)
-        
-        # Limpiar last_alerted_datetimes para las alertas eliminadas
-        keys_to_remove = []
-        for key in last_alerted_datetimes:
-            parts = key.split('-')
-            if len(parts) == 2:
-                try:
-                    alert_user_id = int(parts[0])
-                    alert_id_in_key = int(parts[1])
-                    
-                    if alert_id_in_key in deleted_alert_ids: # If the alert ID was specifically deleted
-                        keys_to_remove.append(key)
-                    elif not is_admin_request and alert_user_id == user_id: # Non-admin deleted their own
-                         keys_to_remove.append(key)
-                    elif is_admin_request and target_user_id_for_admin is not None and alert_user_id == target_user_id_for_admin: # Admin deleted specific user's
-                        keys_to_remove.append(key)
-                    elif is_admin_request and target_user_id_for_admin is None: # Admin deleted ALL alerts
-                        keys_to_remove.append(key)
-                except ValueError:
-                    pass # Ignorar claves mal formadas
-        for key in keys_to_remove:
-            del last_alerted_datetimes[key]
-        save_last_alerted_datetimes(last_alerted_datetimes)
+async def delete_all_alerts_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try: # <--- ADD THIS 'try' BLOCK HERE
+        if deleted_count > 0:
+            save_alerts(alerts)
+            
+            # Limpiar last_alerted_datetimes para las alertas eliminadas
+            keys_to_remove = []
+            for key in last_alerted_datetimes:
+                parts = key.split('-')
+                if len(parts) == 2:
+                    try:
+                        alert_user_id = int(parts[0])
+                        alert_id_in_key = int(parts[1])
+                        
+                        if alert_id_in_key in deleted_alert_ids: # If the alert ID was specifically deleted
+                            keys_to_remove.append(key)
+                        elif not is_admin_request and alert_user_id == user_id: # Non-admin deleted their own
+                            keys_to_remove.append(key)
+                        elif is_admin_request and target_user_id_for_admin is not None and alert_user_id == target_user_id_for_admin: # Admin deleted specific user's
+                            keys_to_remove.append(key)
+                        elif is_admin_request and target_user_id_for_admin is None: # Admin deleted ALL alerts
+                            keys_to_remove.append(key)
+                    except ValueError:
+                        pass # Ignorar claves mal formadas
+            for key in keys_to_remove:
+                del last_alerted_datetimes[key]
+            save_last_alerted_datetimes(last_alerted_datetimes)
 
-        await update.message.reply_text(f"✅ Se eliminaron {deleted_count} alerta(s){message_suffix}.")
-    else:
-        if is_admin_request and target_user_id_for_admin:
-            await update.message.reply_text(f"No se encontraron alertas para el usuario ID {target_user_id_for_admin}.")
-        elif is_admin_request and not target_user_id_for_admin:
-            await update.message.reply_text("No hay alertas activas en el bot para eliminar.")
-        else: # Normal user
-            await update.message.reply_text("No tienes alertas activas para eliminar.")
-    
-    except Exception as e:
+            await update.message.reply_text(f"✅ Se eliminaron {deleted_count} alerta(s){message_suffix}.")
+        else:
+            if is_admin_request and target_user_id_for_admin:
+                await update.message.reply_text(f"No se encontraron alertas para el usuario ID {target_user_id_for_admin}.")
+            elif is_admin_request and not target_user_id_for_admin:
+                await update.message.reply_text("No hay alertas activas en el bot para eliminar.")
+            else: # Normal user
+                await update.message.reply_text("No tienes alertas activas para eliminar.")
+        
+    except Exception as e: # <--- THIS IS NOW CORRECTLY PAIRED WITH THE 'try'
         logger.error(f"Error al eliminar todas las alertas: {e}", exc_info=True)
         await update.message.reply_text("Ocurrió un error al intentar eliminar las alertas.")
 
