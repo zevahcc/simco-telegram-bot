@@ -37,7 +37,7 @@ STATIC_RESOURCES_FILE = "recursos_estaticos.json" # Archivo JSON con la lista es
 # Diccionario para almacenar los recursos estáticos (nombre -> ID)
 STATIC_RESOURCES = {}
 
-# --- Funciones de Utilidad para Persistencia ---
+# --- Funciones de Utility para Persistencia ---
 
 def load_alerts():
     """Carga las alertas desde el archivo JSON."""
@@ -132,14 +132,14 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Comandos disponibles:\n"
         "**/alert \\<price objetivo\\> \\<resourceId\\> \\[quality\\] \\[name\\]**\n"
         "\\- Crea una nueva alerta de precio\\.\n"
-        "\\- \\`price objetivo\\`: El precio máximo al que deseas comprar\\.\n"
-        "\\- \\`resourceId\\`: El ID del recurso \\(número entero\\)\\.\n"
-        "\\- \\`quality\\` \\(opcional\\): La calidad mínima del recurso \\(0\\-12\\)\\.\n"
-        "\\- \\`name\\` \\(opcional\\): Un nombre para tu alerta\\.\n\n"
+        "\\- \`price objetivo\`: El precio máximo al que deseas comprar\\.\n"
+        "\\- \`resourceId\`: El ID del recurso \\(número entero\\)\\.\n"
+        "\\- \`quality\` \\(opcional\\): La calidad mínima del recurso \\(0\\-12\\)\\.\n"
+        "\\- \`name\` \\(opcional\\): Un nombre para tu alerta\\.\n\n"
         "**/edit \\<id\\> \\<campo\\> \\<nuevo_valor\\>**\n"
         "\\- Edita una alerta existente por su ID\\.\n"
-        "\\- \\`campo\\`: `target_price`, `quality` o `name`\\.\n"
-        "\\- \\`nuevo_valor\\`: El nuevo valor para el campo\\.\n\n"
+        "\\- \`campo\`: `target_price`, `quality` o `name`\\.\n"
+        "\\- \`nuevo_valor\`: El nuevo valor para el campo\\.\n\n"
         "**/status**\n"
         "\\- Muestra el estado actual del bot\\.\n\n"
         "**/alerts \\[admin_code\\]**\n"
@@ -151,8 +151,8 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "**/deleteall \\[admin_code\\] \\[user_id\\]**\n"
         "\\- Elimina todas las alertas\\.\n"
         "\\- **Sin argumentos**: Elimina **todas tus propias** alertas \\(para usuarios normales\\)\\.\n"
-        "\\- **Con `admin_code`**: \\(Solo Admin\\) Elimina **todas las alertas del bot**\\.\n"
-        "\\- **Con `admin_code` y `user_id`**: \\(Solo Admin\\) Elimina todas las alertas de ese `user_id` específico\\.\n\n"
+        "\\- **Con \`admin_code\`**: \\(Solo Admin\\) Elimina **todas las alertas del bot**\\.\n"
+        "\\- **Con \`admin_code\` y \`user_id\`**: \\(Solo Admin\\) Elimina todas las alertas de ese \`user_id\` específico\\.\n\n"
         "**/price \\<resourceId\\> \\[quality\\]**\n"
         "\\- Muestra el precio actual del mercado para un recurso\\.\n\n"
         "**/resource \\<resourceId\\> \\[quality\\]**\n"
@@ -163,6 +163,27 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "\\- Muestra esta ayuda\\."
     )
     await update.message.reply_markdown_v2(help_message)
+
+async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Muestra los comandos disponibles solo para administradores."""
+    args = context.args
+    if not args or len(args) != 1 or args[0] != ADMIN_CODE:
+        await update.message.reply_text("Permiso denegado. Para ver los comandos de administrador, usa `/admin_help <código_de_administrador>`.")
+        return
+
+    admin_help_message = (
+        "Comandos de Administrador:\n\n"
+        "**/alerts \\<admin_code\\>**\n"
+        "\\- Muestra **todas las alertas** activas del bot\\.\n\n"
+        "**/delete \\<id1\\> \\[id2 ... id5\\] \\<admin_code\\>**\n"
+        "\\- Elimina una o varias alertas por sus IDs \\(hasta 5 a la vez\\)\\.\n"
+        "\\- El `admin_code` debe ser el último argumento para eliminar alertas de *cualquier* usuario\\.\n\n"
+        "**/deleteall \\<admin_code\\> \\[user_id\\]**\n"
+        "\\- Elimina todas las alertas del bot\\.\n"
+        "\\- Si se proporciona solo el `admin_code`: Elimina **todas las alertas del bot** \\(incluyendo las de todos los usuarios\\)\\.\n"
+        "\\- Si se proporciona el `admin_code` y un `user_id`: Elimina todas las alertas de ese `user_id` específico\\.\n"
+    )
+    await update.message.reply_markdown_v2(admin_help_message)
 
 async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -487,22 +508,18 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not args: # No se proporcionan argumentos
         deleted_count = 0
         deleted_alert_ids = set()
-        initial_alerts_len = len(alerts)
+        initial_alerts_copy = list(alerts) # Copy to iterate over
         
         # Filtrar solo las alertas del usuario actual
         alerts[:] = [
-            alert_data for alert_data in alerts
+            alert_data for alert_data in initial_alerts_copy
             if alert_data['user_id'] != user_id
         ]
         
-        deleted_count = initial_alerts_len - len(alerts)
+        deleted_count = len(initial_alerts_copy) - len(alerts)
         
         # Identificar los IDs de las alertas que se acaban de borrar para limpiar last_alerted_datetimes
-        for alert_data in (a for a in initial_alerts_len if a not in alerts): # This logic is problematic for large lists, better to compare against original
-             deleted_alert_ids.add(alert_data['id'])
-        
-        # Correct approach to identify deleted_alert_ids after filtering:
-        original_alert_ids_of_user = {a['id'] for a in initial_alerts_len if a['user_id'] == user_id}
+        original_alert_ids_of_user = {a['id'] for a in initial_alerts_copy if a['user_id'] == user_id}
         remaining_alert_ids_of_user = {a['id'] for a in alerts if a['user_id'] == user_id}
         deleted_alert_ids_for_user = original_alert_ids_of_user - remaining_alert_ids_of_user
 
