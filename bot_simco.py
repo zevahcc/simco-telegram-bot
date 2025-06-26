@@ -534,68 +534,207 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         message_suffix = " tuyas."
 
-async def delete_all_alerts_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    try: # <--- ADD THIS 'try' BLOCK HERE
-        if deleted_count > 0:
-            save_alerts(alerts)
-            
-            # Limpiar last_alerted_datetimes para las alertas eliminadas
-            keys_to_remove = []
-            for key in last_alerted_datetimes:
-                parts = key.split('-')
-                if len(parts) == 2:
-                    try:
-                        alert_user_id = int(parts[0])
-                        alert_id_in_key = int(parts[1])
-                        
-                        if alert_id_in_key in deleted_alert_ids: # If the alert ID was specifically deleted
-                            keys_to_remove.append(key)
-                        elif not is_admin_request and alert_user_id == user_id: # Non-admin deleted their own
-                            keys_to_remove.append(key)
-                        elif is_admin_request and target_user_id_for_admin is not None and alert_user_id == target_user_id_for_admin: # Admin deleted specific user's
-                            keys_to_remove.append(key)
-                        elif is_admin_request and target_user_id_for_admin is None: # Admin deleted ALL alerts
-                            keys_to_remove.append(key)
-                    except ValueError:
-                        pass # Ignorar claves mal formadas
-            for key in keys_to_remove:
-                del last_alerted_datetimes[key]
-            save_last_alerted_datetimes(last_alerted_datetimes)
-
-            await update.message.reply_text(f"✅ Se eliminaron {deleted_count} alerta(s){message_suffix}.")
-        else:
-            if is_admin_request and target_user_id_for_admin:
-                await update.message.reply_text(f"No se encontraron alertas para el usuario ID {target_user_id_for_admin}.")
-            elif is_admin_request and not target_user_id_for_admin:
-                await update.message.reply_text("No hay alertas activas en el bot para eliminar.")
-            else: # Normal user
-                await update.message.reply_text("No tienes alertas activas para eliminar.")
+    if deleted_count > 0:
+        save_alerts(alerts)
         
-    except Exception as e: # <--- THIS IS NOW CORRECTLY PAIRED WITH THE 'try'
+        # Limpiar last_alerted_datetimes para las alertas eliminadas
+        keys_to_remove = []
+        for key in last_alerted_datetimes:
+            parts = key.split('-')
+            if len(parts) == 2:
+                try:
+                    alert_user_id = int(parts[0])
+                    alert_id_in_key = int(parts[1])
+                    
+                    if alert_id_in_key in deleted_alert_ids: # If the alert ID was specifically deleted
+                        keys_to_remove.append(key)
+                    elif not is_admin_request and alert_user_id == user_id: # Non-admin deleted their own
+                         keys_to_remove.append(key)
+                    elif is_admin_request and target_user_id_for_admin is not None and alert_user_id == target_user_id_for_admin: # Admin deleted specific user's
+                        keys_to_remove.append(key)
+                    elif is_admin_request and target_user_id_for_admin is None: # Admin deleted ALL alerts
+                        keys_to_remove.append(key)
+                except ValueError:
+                    pass # Ignorar claves mal formadas
+        for key in keys_to_remove:
+            del last_alerted_datetimes[key]
+        save_last_alerted_datetimes(last_alerted_datetimes)
+
+        await update.message.reply_text(f"✅ Se eliminaron {deleted_count} alerta(s){message_suffix}.")
+    else:
+        if is_admin_request and target_user_id_for_admin:
+            await update.message.reply_text(f"No se encontraron alertas para el usuario ID {target_user_id_for_admin}.")
+        elif is_admin_request and not target_user_id_for_admin:
+            await update.message.reply_text("No hay alertas activas en el bot para eliminar.")
+        else: # Normal user
+            await update.message.reply_text("No tienes alertas activas para eliminar.")
+
+    except Exception as e:
         logger.error(f"Error al eliminar todas las alertas: {e}", exc_info=True)
         await update.message.reply_text("Ocurrió un error al intentar eliminar las alertas.")
 
 
-async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+# --- Nueva función para el comando /resource ---
+async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Obtiene el precio actual del mercado para un resourceId y opcionalmente quality.
-    Uso: /price <resourceId> [quality]
+    Obtiene y muestra información detallada de un recurso usando su resourceId y opcionalmente quality.
+    Uso: /resource <resourceId> [quality]
     """
     args = context.args
-    if not args or len(args) < 1:
+    if not args or len(args) < 1 or len(args) > 2: # Allow 1 or 2 arguments
         await update.message.reply_text(
-            "Uso incorrecto. Ejemplo: `/price 123` o `/price 123 5`"
+            "Uso incorrecto. Ejemplo: `/resource 1` o `/resource 1 0`"
         )
         return
 
     try:
         resource_id = int(args[0])
-        quality_filter = None
-        if len(args) > 1:
-            quality_filter = int(args[1])
-            if not (0 <= quality_filter <= 12):
-                raise ValueError("La calidad debe estar entre 0 y 12.")
+        if not (1 <= resource_id <= 200):
+            await update.message.reply_text("El `resourceId` debe ser un número entero entre 1 y 200.")
+            return
 
+        quality_filter = None
+        if len(args) == 2:
+            try:
+                quality_filter = int(args[1])
+                if not (0 <= quality_filter <= 12):
+                    raise ValueError("La calidad debe estar entre 0 y 12.")
+            except ValueError:
+                await update.message.reply_text("La calidad debe ser un número entero entre 0 y 12.")
+                return
+
+        full_resource_api_url = f"{RESOURCE_API_BASE_URL}{resource_id}"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(full_resource_api_url)
+            response.raise_for_status() # Lanza una excepción si la respuesta no es 2xx
+            data = response.json()
+
+            resource_name = data['resource']['resourceName']
+            summaries_by_quality = data['resource']['summariesByQuality']
+
+            # Escapar los paréntesis en el mensaje inicial
+            message = f"📊 Información del Recurso: *{escape_markdown_v2(resource_name)}* \\(ID: `{resource_id}`\\)\n"
+            if quality_filter is not None:
+                message += f"Para Calidad: `{quality_filter}`\n\n"
+            else:
+                message += "\n"
+
+            found_summaries = []
+            if summaries_by_quality:
+                for summary in summaries_by_quality:
+                    if quality_filter is None or summary['quality'] == quality_filter:
+                        found_summaries.append(summary)
+
+            if found_summaries:
+                for summary in found_summaries:
+                    quality = summary['quality']
+                    last_day_candlestick = summary.get('lastDayCandlestick')
+
+                    message += f"➡️ Calidad: `{quality}`\n"
+                    if last_day_candlestick:
+                        open_price = last_day_candlestick.get('open', 'N/A')
+                        low_price = last_day_candlestick.get('low', 'N/A')
+                        high_price = last_day_candlestick.get('high', 'N/A')
+                        close_price = last_day_candlestick.get('close', 'N/A')
+                        volume = last_day_candlestick.get('volume', 'N/A')
+                        vwap = last_day_candlestick.get('vwap', 'N/A')
+
+                        # Formatear números solo si no son 'N/A'
+                        open_str = f"{open_price:.3f}" if isinstance(open_price, (int, float)) else str(open_price)
+                        low_str = f"{low_price:.3f}" if isinstance(low_price, (int, float)) else str(low_price)
+                        high_str = f"{high_price:.3f}" if isinstance(high_price, (int, float)) else str(high_price)
+                        close_str = f"{close_price:.3f}" if isinstance(close_price, (int, float)) else str(close_price)
+                        volume_str = f"{volume:,}" if isinstance(volume, (int, float)) else str(volume)
+                        vwap_str = f"{vwap:.3f}" if isinstance(vwap, (int, float)) else str(vwap)
+
+                        # Escapar solo los caracteres que Telegram MarkdownV2 podría interpretar como sintaxis
+                        # Los puntos y guiones en números y fechas no necesitan ser escapados aquí
+                        # porque están dentro de un contexto de texto normal.
+                        message += (
+                            f"  Apertura: `{open_str}`\n"
+                            f"  Mínimo: `{low_str}`\n"
+                            f"  Máximo: `{high_str}`\n"
+                            f"  Cierre: `{close_str}`\n"
+                            f"  Volumen: `{volume_str}`\n"
+                            f"  VWAP: `{vwap_str}`\n"
+                        ).replace('.', '\\.').replace('-', '\\-').replace(',', '\\,') # Re-applying specific escapes here for safety.
+
+
+                    else:
+                        message += "  Datos del último día no disponibles.\n"
+                    message += "\n"
+                await update.message.reply_markdown_v2(message)
+            else:
+                if quality_filter is not None:
+                    await update.message.reply_text(f"No se encontraron datos para el Resource ID {resource_id} con calidad {quality_filter}.")
+                else:
+                    await update.message.reply_text(f"No se encontraron datos de mercado para el Resource ID {resource_id}.")
+
+    except ValueError:
+        await update.message.reply_text("El `resourceId` debe ser un número entero válido.")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            await update.message.reply_text(f"Resource ID {resource_id} no encontrado en la API. Por favor, verifica el ID.")
+        else:
+            await update.message.reply_text(f"Error al obtener datos de la API de recursos: {e.response.status_code}")
+        logger.error(f"Error HTTP al obtener información del recurso: {e}")
+    except KeyError as e:
+        await update.message.reply_text(f"Error al procesar los datos del recurso. Faltan datos esperados: {e}")
+        logger.error(f"Error de clave en la respuesta de la API de recursos: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error inesperado al obtener información del recurso: {e}", exc_info=True)
+        await update.message.reply_text("Ocurrió un error inesperado al obtener la información del recurso. Por favor, inténtalo de nuevo más tarde.")
+
+async def find_resource_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Busca el ID de un recurso por su nombre.
+    Uso: /findid <nombre_del_recurso>
+    Requiere al menos 3 letras, ignora mayúsculas/minúsculas y tildes.
+    """
+    args = context.args
+    if not args:
+        await update.message.reply_text("Uso: `/findid <nombre_del_recurso>`\nPor favor, ingresa al menos 3 letras del nombre del recurso.")
+        return
+
+    search_query = " ".join(args)
+    
+    if len(search_query) < 3:
+        await update.message.reply_text("Por favor, ingresa al menos 3 letras para la búsqueda del recurso.")
+        return
+
+    if not STATIC_RESOURCES:
+        await update.message.reply_text("Lo siento, la lista de recursos estáticos no está disponible. Por favor, informa al administrador del bot.")
+        return
+
+    matches = search_resources_by_query(search_query)
+
+    if matches:
+        message = f"Coincidencias encontradas para '{escape_markdown_v2(search_query)}':\n\n" # Escape the search query itself
+        for name, resource_id in matches:
+            message += f"\\- **{escape_markdown_v2(name)}** \\(ID: `{resource_id}`\\)\n" 
+        
+        # Limitar el número de resultados para evitar mensajes muy largos en Telegram
+        if len(matches) > 10: # Si hay más de 10 coincidencias
+            message += escape_markdown_v2(f"\nSe encontraron {len(matches)} coincidencias. Mostrando las primeras 10. Por favor, sé más específico.")
+            message_parts = message.split('\n')
+            message = '\n'.join(message_parts[:13]) # Limita a las primeras 10 entradas de la lista + encabezados
+
+        await update.message.reply_markdown_v2(message)
+    else:
+        await update.message.reply_text(f"No se encontraron recursos que coincidan con '{search_query}'.")
+
+
+# --- Lógica de Verificación de Alertas (Job del Bot) ---
+
+async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Función que se ejecuta cada 30 segundos para verificar los precios."""
+    logger.info("Iniciando verificación de precios...")
+    if not alerts:
+        logger.info("No hay alertas activas para verificar.")
+        return
+
+    try:
         async with httpx.AsyncClient() as client:
             response = await client.get(API_URL)
             response.raise_for_status()
@@ -657,9 +796,7 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     except httpx.HTTPStatusError as e:
         logger.error(f"Error HTTP al verificar precios: {e}")
-    # ¡ATENCIÓN! Si este es el lugar donde ocurre el SyntaxError, verifica la indentación
-    # de esta línea 'except' y del bloque 'try' que la precede. Deben estar alineados.
-    except Exception as e: 
+    except Exception as e:
         logger.error(f"Error en la verificación de precios: {e}", exc_info=True)
 
 def main() -> None:
@@ -669,7 +806,7 @@ def main() -> None:
     # Añadir manejadores de comandos
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help))
-    application.add_handler(CommandHandler("admin_help", admin_help)) # NUEVO: Manejador para ayuda de admin
+    application.add_handler(CommandHandler("admin_help", admin_help))
     application.add_handler(CommandHandler("alert", alert))
     application.add_handler(CommandHandler("edit", edit_alert))
     application.add_handler(CommandHandler("status", status))
@@ -677,8 +814,8 @@ def main() -> None:
     application.add_handler(CommandHandler("delete", delete_alert))
     application.add_handler(CommandHandler("deleteall", delete_all_alerts))
     application.add_handler(CommandHandler("price", get_price))
-    application.add_handler(CommandHandler("resource", get_resource_info))
-    application.add_handler(CommandHandler("findid", find_resource_id))
+    application.add_handler(CommandHandler("resource", get_resource_info)) # Handler for /resource
+    application.add_handler(CommandHandler("findid", find_resource_id)) # Handler for /findid
 
 
     # Configurar el Job Queue para la verificación de precios
@@ -691,3 +828,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
