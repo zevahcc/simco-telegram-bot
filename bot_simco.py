@@ -568,7 +568,6 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text("No hay alertas activas en el bot para eliminar.")
         else: # Normal user
             await update.message.reply_text("No tienes alertas activas para eliminar.")
-
     except Exception as e:
         logger.error(f"Error al eliminar todas las alertas: {e}", exc_info=True)
         await update.message.reply_text("Ocurrió un error al intentar eliminar las alertas.")
