@@ -131,35 +131,35 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     help_message = (
         "Comandos disponibles:\n"
         "**/alert \\<price objetivo\\> \\<resourceId\\> \\[quality\\] \\[name\\]**\n"
-        "\\- Crea una nueva alerta de precio\\.\n"
-        "\\- \`price objetivo\`\\: El precio máximo al que deseas comprar\\.\n" # Corrected escaping for colon
-        "\\- \`resourceId\`\\: El ID del recurso \\(número entero\\)\\.\n" # Corrected escaping for colon
-        "\\- \`quality\` \\(opcional\\)\\: La calidad mínima del recurso \\(0\\-12\\)\\.\n" # Corrected escaping for colon after parenthesis
-        "\\- \`name\` \\(opcional\\)\\: Un nombre para tu alerta\\.\n\n" # Corrected escaping for colon after parenthesis
+        "\\- Crea una nueva alerta de precio\\.\\n"
+        "\\- \`price objetivo\`\\: El precio máximo al que deseas comprar\\.\\n"
+        "\\- \`resourceId\`\\: El ID del recurso \\(número entero\\)\\.\\n"
+        "\\- \`quality\` \\(opcional\\)\\: La calidad mínima del recurso \\(0\\-12\\)\\.\\n"
+        "\\- \`name\` \\(opcional\\)\\: Un nombre para tu alerta\\.\\n\\n"
         "**/edit \\<id\\> \\<campo\\> \\<nuevo_valor\\>**\n"
-        "\\- Edita una alerta existente por su ID\\.\n"
-        "\\- \`campo\`\\: \`target_price\`\\, \`quality\` o \`name\`\\.\n" # Corrected escaping for colon and comma
-        "\\- \`nuevo_valor\`\\: El nuevo valor para el campo\\.\n\n" # Corrected escaping for colon
+        "\\- Edita una alerta existente por su ID\\.\\n"
+        "\\- \`campo\`\\: \`target_price\`\\, \`quality\` o \`name\`\\.\\n"
+        "\\- \`nuevo_valor\`\\: El nuevo valor para el campo\\.\\n\\n"
         "**/status**\n"
-        "\\- Muestra el estado actual del bot\\.\n\n"
+        "\\- Muestra el estado actual del bot\\.\\n\\n"
         "**/alerts \\[admin_code\\]**\n"
-        "\\- Muestra todas tus alertas activas\\.\n"
-        "\\- Si eres administrador y usas el \`admin_code\`\\, muestra todas las alertas del bot\\.\n\n" # Corrected escaping for comma
+        "\\- Muestra todas tus alertas activas\\.\\n"
+        "\\- Si eres administrador y usas el \`admin_code\`\\, muestra todas las alertas del bot\\.\\n\\n"
         "**/delete \\<id1\\> \\[id2 ... id5\\] \\[admin_code\\]**\n"
-        "\\- Elimina una o varias alertas por sus IDs \\(hasta 5 a la vez\\)\\.\n"
-        "\\- Si eres administrador y usas el \`admin_code\` \\(como último argumento\\)\\," # Corrected comma after parenthesis
-        " puedes eliminar las alertas de cualquier usuario\\.\n\n"
+        "\\- Elimina una o varias alertas por sus IDs \\(hasta 5 a la vez\\)\\.\\n"
+        "\\- Si eres administrador y usas el \`admin_code\` \\(como último argumento\\)\\,"
+        " puedes eliminar las alertas de cualquier usuario\\.\\n\\n"
         "**/deleteall \\[admin_code\\] \\[user_id\\]**\n"
-        "\\- Elimina todas las alertas\\.\n"
-        "\\- **Sin argumentos**: Elimina **todas tus propias** alertas \\(para usuarios normales\\)\\.\n"
-        "\\- **Con \`admin_code\`**: \\(Solo Admin\\) Elimina **todas las alertas del bot**\\.\n"
-        "\\- **Con \`admin_code\` y \`user_id\`**: \\(Solo Admin\\) Elimina todas las alertas de ese \`user_id\` específico\\.\n\n"
+        "\\- Elimina todas las alertas\\.\\n"
+        "\\- **Sin argumentos**: Elimina **todas tus propias** alertas \\(para usuarios normales\\)\\.\\n"
+        "\\- **Con \`admin_code\`**: \\(Solo Admin\\) Elimina **todas las alertas del bot**\\.\\n"
+        "\\- **Con \`admin_code\` y \`user_id\`**: \\(Solo Admin\\) Elimina todas las alertas de ese \`user_id\` específico\\.\\n\\n"
         "**/price \\<resourceId\\> \\[quality\\]**\n"
-        "\\- Muestra el precio actual del mercado para un recurso\\.\n\n"
+        "\\- Muestra el precio actual del mercado para un recurso\\.\\n\\n"
         "**/resource \\<resourceId\\> \\[quality\\]**\n"
-        "\\- Muestra información detallada sobre un recurso y sus precios del último día\\.\n\n"
+        "\\- Muestra información detallada sobre un recurso y sus precios del último día\\.\\n\\n"
         "**/findid \\<nombre_del_recurso\\>**\n"
-        "\\- Busca el ID de un recurso por su nombre \\(mínimo 3 letras, insensible a mayúsculas/tildes\\)\\.\n\n"
+        "\\- Busca el ID de un recurso por su nombre \\(mínimo 3 letras, insensible a mayúsculas/tildes\\)\\.\\n\\n"
         "**/help**\n"
         "\\- Muestra esta ayuda\\."
     )
@@ -175,14 +175,14 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     admin_help_message = (
         "Comandos de Administrador:\n\n"
         "**/alerts \\<admin_code\\>**\n"
-        "\\- Muestra **todas las alertas** activas del bot\\.\n\n"
+        "\\- Muestra **todas las alertas** activas del bot\\.\\n\\n"
         "**/delete \\<id1\\> \\[id2 ... id5\\] \\<admin_code\\>**\n"
-        "\\- Elimina una o varias alertas por sus IDs \\(hasta 5 a la vez\\)\\.\n"
-        "\\- El \`admin_code\` debe ser el último argumento para eliminar alertas de *cualquier* usuario\\.\n\n" # Ensured correct escaping
+        "\\- Elimina una o varias alertas por sus IDs \\(hasta 5 a la vez\\)\\.\\n"
+        "\\- El \`admin_code\` debe ser el último argumento para eliminar alertas de *cualquier* usuario\\.\\n\\n" # Ensured correct escaping
         "**/deleteall \\<admin_code\\> \\[user_id\\]**\n"
-        "\\- Elimina todas las alertas del bot\\.\n"
-        "\\- Si se proporciona solo el \`admin_code\`\\: Elimina **todas las alertas del bot** \\(incluyendo las de todos los usuarios\\)\\.\n" # Corrected colon escaping
-        "\\- Si se proporciona el \`admin_code\` y un \`user_id\`\\: Elimina todas las alertas de ese \`user_id\` específico\\.\n" # Corrected colon escaping
+        "\\- Elimina todas las alertas del bot\\.\\n"
+        "\\- Si se proporciona solo el \`admin_code\`\\: Elimina **todas las alertas del bot** \\(incluyendo las de todos los usuarios\\)\\.\\n"
+        "\\- Si se proporciona el \`admin_code\` y un \`user_id\`\\: Elimina todas las alertas de ese \`user_id\` específico\\.\\n"
     )
     await update.message.reply_markdown_v2(admin_help_message)
 
