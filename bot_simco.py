@@ -655,7 +655,10 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     except httpx.HTTPStatusError as e:
         logger.error(f"Error HTTP al verificar precios: {e}")
-    except Exception as e: # <--- Python apunta a esta línea como "invalid syntax"
+    # ¡ATENCIÓN! Si este es el lugar donde ocurre el SyntaxError, verifica la indentación
+    # de esta línea 'except' y del bloque 'try' que la precede. Deben estar alineados.
+        
+    except Exception as e: 
         logger.error(f"Error en la verificación de precios: {e}", exc_info=True)
 
 def main() -> None:
