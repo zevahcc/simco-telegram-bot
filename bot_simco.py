@@ -137,7 +137,7 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"Crea una nueva alerta de precio\n"
         f"price objetivo: El precio máximo al que deseas comprar\n"
         f"resourceId: El ID del recurso número entero\n"
-        f"quality \\(opcional\\): La calidad mínima del recurso 0-12\n"
+        f"quality \\(opcional\\): La calidad mínima del recurso 0\\-12\n" # Escaped hyphen
         f"name \\(opcional\\): Un nombre para tu alerta\n\n"
         "**/edit \\<id\\> \\<campo\\> \\<nuevo_valor\\>**\n"
         f"Edita una alerta existente por su ID\n"
@@ -148,13 +148,13 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "**/alerts \\[admin_code\\]**\n"
         f"Muestra todas tus alertas activas\n"
         f"Si eres administrador y usas el admin_code, muestra todas las alertas del bot\n\n"
-        "**/delete \\<id1\\> \\[id2 ... id5\\] \\[admin_code\\]**\n"
+        "**/delete \\<id1\\> \\[id2 \\.\\.\\. id5\\] \\[admin_code\\]**\n" # Escaped dots
         f"Elimina una o varias alertas por sus IDs hasta 5 a la vez\n"
         f"Si eres administrador y usas el admin_code como último argumento, puedes eliminar las alertas de cualquier usuario\n\n"
         "**/deleteall \\[admin_code\\] \\[user_id\\]**\n"
         f"Elimina todas las alertas\n"
-        f"**Sin argumentos**: Elimina **todas tus propias** alertas para usuarios normales\n"
-        f"**Con admin_code**: Solo Admin Elimina **todas las alertas del bot** incluyendo las de todos los usuarios\n"
+        f"**Sin argumentos**: Elimina \\*\\*todas tus propias\\*\\* alertas para usuarios normales\n" # Escaped asterisks
+        f"**Con admin_code**: Solo Admin Elimina \\*\\*todas las alertas del bot\\*\\* incluyendo las de todos los usuarios\n" # Escaped asterisks
         f"**Con admin_code y user_id**: Solo Admin Elimina todas las alertas de ese user_id específico\n\n"
         "**/price \\<resourceId\\> \\[quality\\]**\n"
         f"Muestra el precio actual del mercado para un recurso\n\n"
@@ -165,7 +165,6 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "**/help**\n"
         f"Muestra esta ayuda."
     )
-    # MODIFICACIÓN: help_message ya está pre-formateado para MarkdownV2, no necesita escape adicional.
     await update.message.reply_markdown_v2(help_message)
 
 async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -178,16 +177,15 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     admin_help_message = (
         f"Comandos de Administrador:\n\n"
         "**/alerts \\<admin_code\\>**\n"
-        f"Muestra **todas las alertas** activas del bot.\n\n"
-        "**/delete \\<id1\\> \\[id2 ... id5\\] \\<admin_code\\>**\n"
+        f"Muestra \\*\\*todas las alertas\\*\\* activas del bot\\.\n\n" # Escaped asterisks and dot
+        "**/delete \\<id1\\> \\[id2 \\.\\.\\. id5\\] \\<admin_code\\>**\n" # Escaped dots
         f"Elimina una o varias alertas por sus IDs hasta 5 a la vez\n"
-        f"El `admin_code` debe ser el último argumento para eliminar alertas de *cualquier* usuario\n\n"
+        f"El `admin_code` debe ser el último argumento para eliminar alertas de \\*cualquier\\* usuario\n\n" # Escaped asterisk
         "**/deleteall \\<admin_code\\> \\[user_id\\]**\n"
-        f"Elimina todas las alertas del bot.\n"
-        f"Si se proporciona solo el admin_code: Elimina **todas las alertas del bot** incluyendo las de todos los usuarios\n"
-        f"Si se proporciona el admin_code y un user_id: Elimina todas las alertas de ese user_id específico."
+        f"Elimina todas las alertas del bot\\.\n" # Escaped dot
+        f"Si se proporciona solo el admin_code: Elimina \\*\\*todas las alertas del bot\\*\\* incluyendo las de todos los usuarios\n" # Escaped asterisks
+        f"Si se proporciona el admin_code y un user_id: Elimina todas las alertas de ese user_id específico\\." # Escaped dot
     )
-    # MODIFICACIÓN: admin_help_message ya está pre-formateado para MarkdownV2, no necesita escape adicional.
     await update.message.reply_markdown_v2(admin_help_message)
 
 async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
