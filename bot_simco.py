@@ -26,7 +26,7 @@ if not TELEGRAM_BOT_TOKEN:
     raise ValueError("No se ha configurado la variable de entorno TELEGRAM_BOT_TOKEN.")
 
 # Código de administrador
-ADMIN_CODE = "2358" # El código que los administradores deben usar
+ADMIN_CODE = "e2358e" # El código que los administradores deben usar
 
 API_URL = "https://api.simcotools.com/v1/realms/0/market/prices"
 RESOURCE_API_BASE_URL = "https://api.simcotools.com/v1/realms/0/market/resources/"
@@ -127,7 +127,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Muestra los comandos disponibles."""
+    """Muestra los comandos disponibles para usuarios generales."""
     help_message = (
         "Comandos disponibles:\n"
         "**/alert \\<price objetivo\\> \\<resourceId\\> \\[quality\\] \\[name\\]**\n"
@@ -142,15 +142,12 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "\\- \\`nuevo_valor\\`: El nuevo valor para el campo\\.\n\n"
         "**/status**\n"
         "\\- Muestra el estado actual del bot\\.\n\n"
-        "**/alerts \\[admin_code\\]**\n"
-        "\\- Muestra todas tus alertas activas\\.\n"
-        "\\- Si eres administrador y usas el `admin_code`, muestra todas las alertas del bot\\.\n\n"
-        "**/delete \\<id\\> \\[admin_code\\]**\n"
-        "\\- Elimina una alerta por su ID\\.\n"
-        "\\- Si eres administrador y usas el `admin_code`, puedes eliminar la alerta de cualquier usuario\\.\n\n"
-        "**/deleteall \\[admin_code\\] \\[user_id\\]**\n"
-        "\\- \\(Solo Admin\\) Elimina todas las alertas del bot\\.\n"
-        "\\- Si se proporciona un `user_id`, elimina todas las alertas de ese usuario\\.\n\n"
+        "**/alerts**\n"
+        "\\- Muestra todas tus alertas activas\\.\n\n"
+        "**/delete \\<id1\\> \\[id2 ... id5\\]**\n"
+        "\\- Elimina una o varias alertas por sus IDs \\(hasta 5 a la vez\\)\\.\n\n"
+        "**/deleteall**\n"
+        "\\- Elimina **todas tus propias** alertas\\.\n\n"
         "**/price \\<resourceId\\> \\[quality\\]**\n"
         "\\- Muestra el precio actual del mercado para un recurso\\.\n\n"
         "**/resource \\<resourceId\\> \\[quality\\]**\n"
@@ -158,9 +155,33 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "**/findid \\<nombre_del_recurso\\>**\n"
         "\\- Busca el ID de un recurso por su nombre \\(mínimo 3 letras, insensible a mayúsculas/tildes\\)\\.\n\n"
         "**/help**\n"
-        "\\- Muestra esta ayuda\\."
+        "\\- Muestra esta ayuda\\.\n\n"
+        "Para comandos de administrador, usa /admin_help con el código de administrador." # Hint for admin help
     )
     await update.message.reply_markdown_v2(help_message)
+
+
+async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Muestra los comandos disponibles solo para administradores."""
+    args = context.args
+    if not args or len(args) != 1 or args[0] != ADMIN_CODE:
+        await update.message.reply_text("Permiso denegado. Para ver los comandos de administrador, usa `/admin_help <código_de_administrador>`.")
+        return
+
+    admin_help_message = (
+        "Comandos de Administrador:\n\n"
+        "**/alerts \\<admin_code\\>**\n"
+        "\\- Muestra **todas las alertas** activas del bot\\.\n\n"
+        "**/delete \\<id1\\> \\[id2 ... id5\\] \\<admin_code\\>**\n"
+        "\\- Elimina una o varias alertas por sus IDs \\(hasta 5 a la vez\\)\\.\n"
+        "\\- El `admin_code` debe ser el último argumento para eliminar alertas de *cualquier* usuario\\.\n\n"
+        "**/deleteall \\<admin_code\\> \\[user_id\\]**\n"
+        "\\- Elimina todas las alertas del bot\\.\n"
+        "\\- Si se proporciona solo el `admin_code`: Elimina **todas las alertas del bot** \\(incluyendo las de todos los usuarios\\)\\.\n"
+        "\\- Si se proporciona el `admin_code` y un `user_id`: Elimina todas las alertas de ese `user_id` específico\\.\n"
+    )
+    await update.message.reply_markdown_v2(admin_help_message)
+
 
 async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -363,140 +384,190 @@ async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Elimina una alerta por su ID.
-    Si se proporciona el ADMIN_CODE, un administrador puede eliminar cualquier alerta.
-    Uso: /delete <id> [admin_code]
+    Elimina una o varias alertas por sus IDs.
+    Uso: /delete <id1> [id2 ... id5] [admin_code]
     """
-
     global alerts
     global last_alerted_datetimes
 
     args = context.args
-    if not args or len(args) < 1 or len(args) > 2:
-        await update.message.reply_text("Uso incorrecto. Ejemplo: `/delete 1` o `/delete 1 2358`")
+    if not args:
+        await update.message.reply_text(
+            "Uso incorrecto. Ejemplo: `/delete 1` o `/delete 1 2 3` o `/delete 5 e2358e`\n"
+            "Puedes eliminar hasta 5 alertas a la vez."
+        )
         return
 
-    try:
-        alert_id_to_delete = int(args[0])
-        user_id = update.effective_user.id
-        is_admin = False
+    user_id = update.effective_user.id
+    is_admin = False
+    alert_ids_to_delete = []
+    
+    # Check if the last argument is the admin code
+    if len(args) > 1 and args[-1] == ADMIN_CODE:
+        is_admin = True
+        # If admin code is provided, the IDs are all arguments except the last one
+        id_args = args[:-1]
+    else:
+        # Otherwise, all arguments are assumed to be IDs
+        id_args = args
 
-        # Check for admin code as the second argument
-        if len(args) == 2 and args[1] == ADMIN_CODE:
-            is_admin = True
+    # Validate number of IDs
+    if not (1 <= len(id_args) <= 5):
+        await update.message.reply_text("Puedes eliminar entre 1 y 5 alertas a la vez.")
+        return
+
+    # Parse alert IDs
+    for arg_id in id_args:
+        try:
+            alert_ids_to_delete.append(int(arg_id))
+        except ValueError:
+            await update.message.reply_text(f"'{arg_id}' no es un ID de alerta válido. Los IDs deben ser números enteros.")
+            return
+
+    deleted_count = 0
+    not_found_or_no_permission = []
+    
+    initial_alerts_state = list(alerts) # Create a copy to iterate and compare against
+    
+    # Build the new alerts list by filtering out the ones to be deleted
+    final_alerts_list = []
+    for alert_data in initial_alerts_state:
+        if alert_data['id'] in alert_ids_to_delete:
+            if is_admin or alert_data['user_id'] == user_id:
+                # This alert will be deleted, do not add it to final_alerts_list
+                deleted_count += 1
+                # Remove from last_alerted_datetimes for this specific alert_id and user_id
+                alert_key = f"{alert_data['user_id']}-{alert_data['id']}"
+                if alert_key in last_alerted_datetimes:
+                    del last_alerted_datetimes[alert_key]
+            else:
+                # This alert cannot be deleted by this user, keep it in the list
+                final_alerts_list.append(alert_data)
+                not_found_or_no_permission.append(f"ID {alert_data['id']} (sin permiso)")
+        else:
+            # This alert was not targeted for deletion, keep it
+            final_alerts_list.append(alert_data)
             
-        initial_len = len(alerts)
-        
-        # Filter alerts based on admin status or user_id
-        if is_admin:
-            # Admin can delete any alert by ID
-            alerts[:] = [
-                alert_data for alert_data in alerts
-                if not (alert_data['id'] == alert_id_to_delete)
-            ]
-        else:
-            # Non-admin can only delete their own alerts
-            alerts[:] = [
-                alert_data for alert_data in alerts
-                if not (alert_data['id'] == alert_id_to_delete and alert_data['user_id'] == user_id)
-            ]
-        
-        if len(alerts) < initial_len:
-            save_alerts(alerts)
-            # Find the alert key to delete from last_alerted_datetimes
-            # This requires knowing the original user_id of the deleted alert
-            # A simpler approach for admin is to clear all related entries for that alert_id
-            keys_to_delete = [key for key in last_alerted_datetimes if key.endswith(f"-{alert_id_to_delete}")]
-            for key in keys_to_delete:
-                del last_alerted_datetimes[key]
-            save_last_alerted_datetimes(last_alerted_datetimes)
+    # Check for IDs requested that were not found at all
+    for requested_id in alert_ids_to_delete:
+        if requested_id not in [a['id'] for a in initial_alerts_state]:
+            not_found_or_no_permission.append(f"ID {requested_id} (no encontrada)")
 
-            await update.message.reply_text(f"✅ Alerta con ID {alert_id_to_delete} eliminada{' (por administrador)' if is_admin else ''}.")
-        else:
-            await update.message.reply_text(f"No se encontró una alerta con ID {alert_id_to_delete} o no tienes permiso para eliminarla.")
-    except ValueError:
-        await update.message.reply_text("El ID o el código de administrador debe ser un número válido.")
-    except Exception as e:
-        logger.error(f"Error al eliminar alerta: {e}")
-        await update.message.reply_text("Ocurrió un error al eliminar la alerta.")
+    alerts[:] = final_alerts_list # Update the global list with the filtered list
+
+    save_alerts(alerts)
+    save_last_alerted_datetimes(last_alerted_datetimes) # Save changes to last alerted datetimes
+
+    response_messages = []
+    if deleted_count > 0:
+        response_messages.append(f"✅ Se eliminaron {deleted_count} alerta(s) con éxito.")
+    if not_found_or_no_permission:
+        response_messages.append(f"⚠️ Las siguientes alertas no se encontraron o no tienes permiso para eliminarlas: {', '.join(not_found_or_no_permission)}.")
+
+    if not response_messages:
+        await update.message.reply_text("No se realizó ninguna eliminación.")
+    else:
+        await update.message.reply_text("\n".join(response_messages))
 
 async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    (Solo Admin) Elimina todas las alertas del bot o todas las alertas de un usuario específico.
+    Elimina todas las alertas del bot o todas las alertas de un usuario específico.
     Uso: /deleteall [admin_code] [user_id]
     """
     global alerts
     global last_alerted_datetimes
 
     args = context.args
+    user_id = update.effective_user.id
     
-    if not args or len(args) < 1 or args[0] != ADMIN_CODE:
-        await update.message.reply_text("Permiso denegado. Solo los administradores con el código correcto pueden usar este comando.")
-        return
-    
-    is_admin = True # We already checked ADMIN_CODE
+    is_admin_request = False
+    target_user_id_for_admin = None
 
-    try:
-        user_id_to_delete_alerts_for = None
+    # Determine if it's an admin request and if a specific user_id is targeted
+    if args and args[0] == ADMIN_CODE:
+        is_admin_request = True
         if len(args) == 2:
             try:
-                user_id_to_delete_alerts_for = int(args[1])
+                target_user_id_for_admin = int(args[1])
             except ValueError:
-                await update.message.reply_text("El ID de usuario debe ser un número entero válido.")
+                await update.message.reply_text("El ID de usuario para eliminar debe ser un número entero válido.")
                 return
+    elif args: # Arguments provided but not ADMIN_CODE first
+        await update.message.reply_text("Permiso denegado. Solo los administradores con el código correcto pueden usar argumentos con este comando.")
+        return
+    
+    # Logic for deletion
+    deleted_count = 0
+    deleted_alert_ids = set() # To track IDs of alerts actually deleted
+    initial_alerts_state = list(alerts) # Create a copy to work with
 
-        initial_len = len(alerts)
-        deleted_count = 0
-        deleted_alert_ids = set()
-
-        if user_id_to_delete_alerts_for is not None:
-            # Delete alerts for a specific user
-            original_alerts_len = len(alerts)
+    if is_admin_request:
+        if target_user_id_for_admin is not None:
+            # Admin deletes all alerts for a specific user_id
+            # Corrected logic to ensure only target_user_id's alerts are removed
             alerts[:] = [
-                alert_data for alert_data in alerts
-                if alert_data['user_id'] != user_id_to_delete_alerts_for
+                alert_data for alert_data in initial_alerts_state
+                if alert_data['user_id'] != target_user_id_for_admin
             ]
-            deleted_count = original_alerts_len - len(alerts)
-            for alert_data in alerts: # Find IDs of deleted alerts
-                if alert_data['user_id'] == user_id_to_delete_alerts_for:
-                    deleted_alert_ids.add(alert_data['id'])
-            
-            message_suffix = f" para el usuario ID {user_id_to_delete_alerts_for}"
+            deleted_count = len(initial_alerts_state) - len(alerts) # Calculate count correctly
+            deleted_alert_ids.update(
+                a['id'] for a in initial_alerts_state
+                if a['user_id'] == target_user_id_for_admin
+            )
+            message_suffix = f" para el usuario ID {target_user_id_for_admin}"
         else:
-            # Delete all alerts
+            # Admin deletes ALL alerts in the bot
             deleted_count = len(alerts)
             deleted_alert_ids.update(alert['id'] for alert in alerts)
             alerts.clear()
-            message_suffix = " del bot"
-        
-        if deleted_count > 0:
-            save_alerts(alerts)
-            
-            # Clear associated last_alerted_datetimes
-            keys_to_remove = []
-            for key in last_alerted_datetimes:
-                # Key format: "user_id-alert_id"
-                parts = key.split('-')
-                if len(parts) == 2:
-                    try:
-                        alert_id_in_key = int(parts[1])
-                        if alert_id_in_key in deleted_alert_ids or user_id_to_delete_alerts_for is None:
-                            keys_to_remove.append(key)
-                        elif user_id_to_delete_alerts_for is not None and int(parts[0]) == user_id_to_delete_alerts_for:
-                             keys_to_remove.append(key)
-                    except ValueError:
-                        # Handle malformed keys if any
-                        pass
-            for key in keys_to_remove:
-                del last_alerted_datetimes[key]
-            save_last_alerted_datetimes(last_alerted_datetimes)
+            message_suffix = " del bot (todas las alertas)."
+    else: # Normal user, no arguments or just /deleteall
+        # User deletes their own alerts
+        alerts[:] = [
+            alert_data for alert_data in initial_alerts_state
+            if alert_data['user_id'] != user_id
+        ]
+        deleted_count = len(initial_alerts_state) - len(alerts) # Calculate count correctly
+        deleted_alert_ids.update(
+            a['id'] for a in initial_alerts_state
+            if a['user_id'] == user_id
+        )
+        message_suffix = " tuyas."
 
-            await update.message.reply_text(f"✅ Se eliminaron {deleted_count} alerta(s){message_suffix}.")
-        else:
-            if user_id_to_delete_alerts_for:
-                await update.message.reply_text(f"No se encontraron alertas para el usuario ID {user_id_to_delete_alerts_for}.")
-            else:
-                await update.message.reply_text("No hay alertas activas en el bot para eliminar.")
+    if deleted_count > 0:
+        save_alerts(alerts)
+        
+        # Limpiar last_alerted_datetimes para las alertas eliminadas
+        keys_to_remove = []
+        for key in last_alerted_datetimes:
+            parts = key.split('-')
+            if len(parts) == 2:
+                try:
+                    alert_user_id = int(parts[0])
+                    alert_id_in_key = int(parts[1])
+                    
+                    if alert_id_in_key in deleted_alert_ids: # If the alert ID was specifically deleted
+                        keys_to_remove.append(key)
+                    elif not is_admin_request and alert_user_id == user_id: # Non-admin deleted their own
+                         keys_to_remove.append(key)
+                    elif is_admin_request and target_user_id_for_admin is not None and alert_user_id == target_user_id_for_admin: # Admin deleted specific user's
+                        keys_to_remove.append(key)
+                    elif is_admin_request and target_user_id_for_admin is None: # Admin deleted ALL alerts
+                        keys_to_remove.append(key)
+                except ValueError:
+                    pass # Ignorar claves mal formadas
+        for key in keys_to_remove:
+            del last_alerted_datetimes[key]
+        save_last_alerted_datetimes(last_alerted_datetimes)
+
+        await update.message.reply_text(f"✅ Se eliminaron {deleted_count} alerta(s){message_suffix}.")
+    else:
+        if is_admin_request and target_user_id_for_admin:
+            await update.message.reply_text(f"No se encontraron alertas para el usuario ID {target_user_id_for_admin}.")
+        elif is_admin_request and not target_user_id_for_admin:
+            await update.message.reply_text("No hay alertas activas en el bot para eliminar.")
+        else: # Normal user
+            await update.message.reply_text("No tienes alertas activas para eliminar.")
 
     except Exception as e:
         logger.error(f"Error al eliminar todas las alertas: {e}", exc_info=True)
@@ -697,8 +768,8 @@ async def find_resource_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if matches:
         message = f"Coincidencias encontradas para '{escape_markdown_v2(search_query)}':\n\n" # Escape the search query itself
         for name, resource_id in matches:
-            # Escape the leading hyphen for list items, then escape name and ID for markdown
-            message += f"\\- *{escape_markdown_v2(name)}* \\(ID: `{resource_id}`\\)\n" 
+            # MODIFICACIÓN AQUÍ: Usar ** para negrita en el nombre, que es menos ambiguo con el guion de lista
+            message += f"\\- **{escape_markdown_v2(name)}** \\(ID: `{resource_id}`\\)\n" 
         
         # Limitar el número de resultados para evitar mensajes muy largos en Telegram
         if len(matches) > 10: # Si hay más de 10 coincidencias
@@ -792,20 +863,20 @@ def main() -> None:
     # Añadir manejadores de comandos
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help))
+    application.add_handler(CommandHandler("admin_help", admin_help)) # NUEVO: Manejador para ayuda de admin
     application.add_handler(CommandHandler("alert", alert))
-    application.add_handler(CommandHandler("edit", edit_alert)) # Nuevo manejador
+    application.add_handler(CommandHandler("edit", edit_alert))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("alerts", show_alerts))
     application.add_handler(CommandHandler("delete", delete_alert))
-    application.add_handler(CommandHandler("deleteall", delete_all_alerts)) # Nuevo manejador
+    application.add_handler(CommandHandler("deleteall", delete_all_alerts))
     application.add_handler(CommandHandler("price", get_price))
     application.add_handler(CommandHandler("resource", get_resource_info))
-    application.add_handler(CommandHandler("findid", find_resource_id)) # Nuevo manejador para buscar ID
+    application.add_handler(CommandHandler("findid", find_resource_id))
 
 
     # Configurar el Job Queue para la verificación de precios
     job_queue: JobQueue = application.job_queue
-    # MODIFICACIÓN AQUÍ: Cambiado de 60 a 30 segundos
     job_queue.run_repeating(check_prices_job, interval=30, first=10) # Se ejecuta cada 30 segundos, empieza después de 10 segundos
 
     # Iniciar el bot
@@ -814,3 +885,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
