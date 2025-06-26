@@ -556,7 +556,7 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                             keys_to_remove.append(key)
                         elif is_admin_request and target_user_id_for_admin is None: # Admin deleted ALL alerts
                             keys_to_remove.append(key)
-                     except ValueError:
+                    except ValueError:
                         pass # Ignorar claves mal formadas
             for key in keys_to_remove:
                 del last_alerted_datetimes[key]
