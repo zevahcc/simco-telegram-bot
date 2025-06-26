@@ -687,9 +687,9 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             summaries_by_quality = data['resource']['summariesByQuality']
 
             # Apply escape_markdown_v2 to the entire base message parts
-            message = escape_markdown_v2(f"📊 Información del Recurso: *{resource_name}* (ID: `{resource_id}`)\n")
+            message = escape_markdown_v2(f"📊 Información del Recurso: *{resource_name}* (ID: {resource_id})\n")
             if quality_filter is not None:
-                message += escape_markdown_v2(f"Para Calidad: `{quality_filter}`\n\n")
+                message += escape_markdown_v2(f"Para Calidad: {quality_filter}\n\n")
             else:
                 message += "\n"
 
@@ -722,12 +722,12 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
                         # Escape the data values as they are inserted into the message
                         message += escape_markdown_v2(
-                            f"  Apertura: `{open_str}`\n"
-                            f"  Mínimo: `{low_str}`\n"
-                            f"  Máximo: `{high_str}`\n"
-                            f"  Cierre: `{close_str}`\n"
-                            f"  Volumen: `{volume_str}`\n"
-                            f"  VWAP: `{vwap_str}`\n"
+                            f"  Apertura: {open_str}\n"
+                            f"  Mínimo: {low_str}\n"
+                            f"  Máximo: {high_str}\n"
+                            f"  Cierre: {close_str}\n"
+                            f"  Volumen: {volume_str}\n"
+                            f"  VWAP: {vwap_str}\n"
                         )
                     else:
                         message += escape_markdown_v2("  Datos del último día no disponibles.\n")
