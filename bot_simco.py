@@ -138,7 +138,7 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"\\- price objetivo: El precio máximo al que deseas comprar\n"
         f"\\- resourceId: El ID del recurso número entero\n"
         f"\\- quality \\(opcional\\): La calidad mínima del recurso 0-12\n"
-        f"\\- name \\(opcional\\): Un nombre para tu alerta\n\n" 
+        f"\\- name \\(opcional\\): Un nombre para tu alerta\n\n"
         "**/edit \\<id\\> \\<campo\\> \\<nuevo_valor\\>**\n"
         f"\\- Edita una alerta existente por su ID\n"
         f"\\- campo: target_price, quality o name\n"
@@ -154,7 +154,7 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "**/deleteall \\[admin_code\\] \\[user_id\\]**\n"
         f"\\- Elimina todas las alertas\n"
         f"\\- **Sin argumentos**: Elimina **todas tus propias** alertas para usuarios normales\n"
-        f"\\- **Con admin_code**: Solo Admin Elimina **todas las alertas del bot** incluyendo las de todos los usuarios\n" 
+        f"\\- **Con admin_code**: Solo Admin Elimina **todas las alertas del bot** incluyendo las de todos los usuarios\n"
         f"\\- **Con admin_code y user_id**: Solo Admin Elimina todas las alertas de ese user_id específico\n\n"
         "**/price \\<resourceId\\> \\[quality\\]**\n"
         f"\\- Muestra el precio actual del mercado para un recurso\n\n"
@@ -317,7 +317,7 @@ async def edit_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         else:
             await update.message.reply_text(f"Campo '{field_to_edit}' no válido para editar. Los campos posibles son: `target_price`, `quality`, `name`.")
             return
-        
+
         save_alerts(alerts)
         await update.message.reply_text(f"✅ {message}")
 
@@ -407,7 +407,7 @@ async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     is_admin = False
     alert_ids_to_delete = []
     admin_code_provided = False
-    
+
     # Check if the last argument is the admin code
     if len(args) > 1 and args[-1] == ADMIN_CODE:
         is_admin = True
@@ -433,7 +433,7 @@ async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     deleted_count = 0
     not_found_or_no_permission = []
-    
+
     initial_alerts_state = list(alerts) # Create a copy to iterate
     updated_alerts = [] # List to build the new state of alerts
 
@@ -453,7 +453,7 @@ async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     # User does not have permission for this specific alert
                     not_found_or_no_permission.append(f"ID {alert_id} (sin permiso)")
                 break # Break from inner loop once ID is processed
-        
+
         if not found_and_deleted and alert_id not in [a['id'] for a in initial_alerts_state]:
             not_found_or_no_permission.append(f"ID {alert_id} (no encontrada)")
 
@@ -479,7 +479,7 @@ async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         else:
             # This alert was not targeted for deletion, keep it
             final_alerts_list.append(alert_data)
-            
+
     alerts[:] = final_alerts_list # Update the global list
 
     save_alerts(alerts)
@@ -506,21 +506,21 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     args = context.args
     user_id = update.effective_user.id
-    
+
     # Caso 1: Usuario NO admin intenta borrar SUS propias alertas
     if not args: # No se proporcionan argumentos
         deleted_count = 0
         deleted_alert_ids = set()
         initial_alerts_copy = list(alerts) # Copy to iterate over
-        
+
         # Filtrar solo las alertas del usuario actual
         alerts[:] = [
             alert_data for alert_data in initial_alerts_copy
             if alert_data['user_id'] != user_id
         ]
-        
+
         deleted_count = len(initial_alerts_copy) - len(alerts)
-        
+
         # Identificar los IDs de las alertas que se acaban de borrar para limpiar last_alerted_datetimes
         original_alert_ids_of_user = {a['id'] for a in initial_alerts_copy if a['user_id'] == user_id}
         remaining_alert_ids_of_user = {a['id'] for a in alerts if a['user_id'] == user_id}
@@ -528,7 +528,7 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         if deleted_count > 0:
             save_alerts(alerts)
-            
+
             keys_to_remove = []
             for key in last_alerted_datetimes:
                 parts = key.split('-')
@@ -537,19 +537,19 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             for key in keys_to_remove:
                 del last_alerted_datetimes[key]
             save_last_alerted_datetimes(last_alerted_datetimes)
-            
+
             await update.message.reply_text(f"✅ Se eliminaron {deleted_count} alerta(s) tuyas.")
         else:
             await update.message.reply_text("No tienes alertas activas para eliminar.")
         return
-    
+
     # Caso 2: Administrador intenta borrar todas las alertas del bot o de un usuario específico
     if args[0] != ADMIN_CODE: # Si se dieron argumentos pero el primero no es el ADMIN_CODE
         await update.message.reply_text("Permiso denegado. Solo los administradores con el código correcto pueden usar este comando con argumentos.")
         return
-    
+
     # A partir de aquí, el usuario es un administrador y proporcionó el ADMIN_CODE
-    is_admin = True 
+    is_admin = True
 
     try:
         user_id_to_delete_alerts_for = None
@@ -575,7 +575,7 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             deleted_count = initial_len - len(alerts)
             # Recopilar IDs de las alertas borradas
             deleted_alert_ids.update(
-                a['id'] for a in temp_alerts_list 
+                a['id'] for a in temp_alerts_list
                 if a['user_id'] == user_id_to_delete_alerts_for
             )
             message_suffix = f" para el usuario ID {user_id_to_delete_alerts_for}"
@@ -585,10 +585,10 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             deleted_alert_ids.update(alert['id'] for alert in alerts)
             alerts.clear()
             message_suffix = " del bot"
-        
+
         if deleted_count > 0:
             save_alerts(alerts)
-            
+
             # Limpiar last_alerted_datetimes para las alertas eliminadas
             keys_to_remove = []
             for key in last_alerted_datetimes:
@@ -796,7 +796,7 @@ async def find_resource_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     search_query = " ".join(args)
-    
+
     # MODIFICACIÓN AQUÍ: Cambiado de 4 a 3
     if len(search_query) < 3:
         await update.message.reply_text("Por favor, ingresa al menos 3 letras para la búsqueda del recurso.")
@@ -812,8 +812,8 @@ async def find_resource_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         message = f"Coincidencias encontradas para '{escape_markdown_v2(search_query)}':\n\n" # Escape the search query itself
         for name, resource_id in matches:
             # MODIFICACIÓN AQUÍ: Usar ** para negrita en el nombre, que es menos ambiguo con el guion de lista
-            message += f"\\- **{escape_markdown_v2(name)}** \\(ID: `{resource_id}`\\)\n" 
-        
+            message += f"\\- **{escape_markdown_v2(name)}** \\(ID: `{resource_id}`\\)\n"
+
         # Limitar el número de resultados para evitar mensajes muy largos en Telegram
         if len(matches) > 10: # Si hay más de 10 coincidencias
             message += escape_markdown_v2(f"\nSe encontraron {len(matches)} coincidencias. Mostrando las primeras 10. Por favor, sé más específico.")
@@ -901,6 +901,10 @@ async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main() -> None:
     """Función principal para ejecutar el bot."""
+    # Es crucial asegurarse de que solo una instancia de este bot esté ejecutándose
+    # en un momento dado para evitar errores de 'Conflict' con la API de Telegram.
+    # Si recibes un error 'Conflict', verifica que no tengas el bot ejecutándose
+    # en múltiples ubicaciones (por ejemplo, localmente y en un servidor).
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Añadir manejadores de comandos
@@ -925,7 +929,11 @@ def main() -> None:
 
     # Iniciar el bot
     logger.info("Bot de SimcoTools iniciado...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Se añade `drop_pending_updates=True` para intentar resolver el error 'Conflict'.
+    # Esto le dice a la API de Telegram que descarte cualquier actualización pendiente
+    # al iniciar el polling, lo que puede ayudar a limpiar sesiones anteriores que no
+    # se cerraron correctamente y que estén causando el conflicto.
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
