@@ -904,6 +904,7 @@ def main() -> None:
     # Añadir manejadores de comandos
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help))
+    application.add_handler(CommandHandler("admin_help", admin_help)) # Añadido el manejador para /admin_help
     application.add_handler(CommandHandler("alert", alert))
     application.add_handler(CommandHandler("edit", edit_alert))
     application.add_handler(CommandHandler("status", status))
