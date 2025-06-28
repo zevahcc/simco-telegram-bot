@@ -937,7 +937,7 @@ def main() -> None:
 
 
     job_queue: JobQueue = application.job_queue
-    job_queue.run_repeating(check_prices_job, interval=30, first=10) # Se ejecuta cada 30 segundos
+    job_queue.run_repeating(check_prices_job, interval=310, first=10) # Se ejecuta cada 310 segundos
 
     logger.info("Bot de SimcoTools iniciado...")
     application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
