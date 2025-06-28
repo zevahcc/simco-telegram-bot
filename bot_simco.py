@@ -28,8 +28,10 @@ if not TELEGRAM_BOT_TOKEN:
 # Código de administrador
 ADMIN_CODE = "e2358e" # El código que los administradores deben usar
 
-API_URL = "https://api.simcotools.com/v1/realms/0/market/prices"
-RESOURCE_API_BASE_URL = "https://api.simcotools.com/v1/realms/0/market/resources/"
+# Nueva API para el mercado
+SIMCOMPANIES_API_BASE_URL = "https://www.simcompanies.com/api/v3/market/1/"
+RESOURCE_API_BASE_URL = "https://api.simcotools.com/v1/realms/0/market/resources/" # Se mantiene para /resource
+
 ALERTS_FILE = "alerts.json"
 LAST_ALERTED_DATETIMES_FILE = "last_alerted_datetimes.json"
 STATIC_RESOURCES_FILE = "recursos_estaticos.json" # Archivo JSON con la lista estática
@@ -53,7 +55,7 @@ def save_alerts(alerts):
         json.dump(alerts, f, indent=4)
 
 def load_last_alerted_datetimes():
-    """Carga los últimos datetimes alertados desde el archivo JSON."""
+    """Carga los últimos datetimes/posted alertados desde el archivo JSON."""
     try:
         with open(LAST_ALERTED_DATETIMES_FILE, 'r') as f:
             return json.load(f)
@@ -61,7 +63,7 @@ def load_last_alerted_datetimes():
         return {}
 
 def save_last_alerted_datetimes(datetimes):
-    """Guarda los últimos datetimes alertados en el archivo JSON."""
+    """Guarda los últimos datetimes/posted alertados en el archivo JSON."""
     with open(LAST_ALERTED_DATETIMES_FILE, 'w') as f:
         json.dump(datetimes, f, indent=4)
 
@@ -614,14 +616,17 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if not (0 <= quality_filter <= 12):
                 raise ValueError("La calidad debe estar entre 0 y 12.")
 
+        # Construir la URL específica del recurso para la nueva API
+        api_url = f"{SIMCOMPANIES_API_BASE_URL}{resource_id}/"
+
         async with httpx.AsyncClient() as client:
-            response = await client.get(API_URL)
+            response = await client.get(api_url)
             response.raise_for_status()
-            data = response.json()
+            market_data = response.json() # La respuesta es directamente la lista de ofertas
 
             found_prices = []
-            for item in data['prices']:
-                if item['resourceId'] == resource_id:
+            for item in market_data:
+                if item['kind'] == resource_id: # Usar 'kind' para resourceId
                     if quality_filter is None or item['quality'] >= quality_filter:
                         found_prices.append(item)
 
@@ -631,10 +636,32 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     message += f" (Quality >= {quality_filter})"
                 message += ":\n"
 
+                # La API ya viene ordenada por precio, pero podemos ordenar por calidad para la visualización si hay varias calidades
                 found_prices.sort(key=lambda x: x['quality'])
 
+                # Mostrar solo el mejor precio (más bajo) para cada calidad o el general
+                displayed_qualities = set()
                 for item in found_prices:
-                    message += f"- Quality {item['quality']}: {item['price']} (última actualización: {datetime.fromisoformat(item['datetime'].replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M:%S')})\n"
+                    if quality_filter is None or item['quality'] >= quality_filter:
+                        if item['quality'] not in displayed_qualities:
+                            posted_time = datetime.fromisoformat(item['posted'].replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M:%S')
+                            message += (
+                                f"- Quality {item['quality']}: {item['price']} "
+                                f"(Cantidad: {item['quantity']:,}, Empresa: {item['seller']['company']}, Publicado: {posted_time})\n"
+                            )
+                            displayed_qualities.add(item['quality'])
+                
+                # Si se pidió una calidad específica y no se encontró, manejarlo
+                if quality_filter is not None and quality_filter not in displayed_qualities and found_prices:
+                     # Buscar si hay ofertas de la calidad exacta solicitada o superior
+                    found_exact_or_higher_quality = [
+                        item for item in found_prices
+                        if item['quality'] >= quality_filter
+                    ]
+                    if not found_exact_or_higher_quality:
+                         await update.message.reply_text(f"No se encontraron precios para Resource ID {resource_id} con calidad >= {quality_filter}.")
+                         return
+
                 await update.message.reply_text(message)
             else:
                 await update.message.reply_text(f"No se encontraron precios para Resource ID {resource_id}")
@@ -642,11 +669,15 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except ValueError as e:
         await update.message.reply_text(f"Error en los parámetros: {e}")
     except httpx.HTTPStatusError as e:
-        await update.message.reply_text(f"Error al obtener datos de la API: {e}")
+        if e.response.status_code == 404:
+            await update.message.reply_text(f"Resource ID {resource_id} no encontrado en la API. Por favor, verifica el ID.")
+        else:
+            await update.message.reply_text(f"Error al obtener datos de la API: {e.response.status_code}")
         logger.error(f"Error HTTP al obtener precios: {e}")
     except Exception as e:
-        logger.error(f"Error al obtener precio: {e}")
+        logger.error(f"Error al obtener precio: {e}", exc_info=True)
         await update.message.reply_text("Ocurrió un error al obtener el precio actual.")
+
 
 async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -662,7 +693,7 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     try:
         resource_id = int(args[0])
-        if not (1 <= resource_id <= 200):
+        if not (1 <= resource_id <= 200): # Rango de Resource ID de SimcoTools API
             await update.message.reply_text("El `resourceId` debe ser un número entero entre 1 y 200.")
             return
 
@@ -811,13 +842,7 @@ async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(API_URL)
-            response.raise_for_status()
-            market_data = response.json()['prices']
-
-            current_time = datetime.now()
-
-            for alert_data in list(alerts):
+            for alert_data in list(alerts): # Iterar sobre una copia para evitar problemas si se modifican
                 user_id = alert_data['user_id']
                 alert_id = alert_data['id']
                 target_price = alert_data['target_price']
@@ -825,49 +850,73 @@ async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 quality_filter = alert_data['quality']
                 alert_name = alert_data['name']
 
-                alert_sent = False
                 alert_key = f"{user_id}-{alert_id}"
 
+                # Construir la URL específica del recurso para la nueva API
+                api_url = f"{SIMCOMPANIES_API_BASE_URL}{resource_id}/"
+                
+                try:
+                    response = await client.get(api_url)
+                    response.raise_for_status()
+                    market_data = response.json() # La respuesta es directamente la lista de ofertas
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 404:
+                        logger.warning(f"Resource ID {resource_id} no encontrado en la API para la alerta {alert_id}. Se saltará esta alerta.")
+                        continue # Pasar a la siguiente alerta
+                    else:
+                        logger.error(f"Error HTTP al obtener precios para Resource ID {resource_id}: {e}")
+                        continue # Pasar a la siguiente alerta
+                except Exception as e:
+                    logger.error(f"Error inesperado al obtener precios para Resource ID {resource_id}: {e}", exc_info=True)
+                    continue # Pasar a la siguiente alerta
+
+                best_offer = None
+                
+                # Encontrar la mejor oferta (precio más bajo para la calidad requerida o superior)
                 for item in market_data:
-                    if item['resourceId'] == resource_id:
-                        if quality_filter is not None and item['quality'] < quality_filter:
-                            continue
+                    # 'kind' en la nueva API es equivalente a 'resourceId'
+                    if item['kind'] == resource_id:
+                        if quality_filter is None or item['quality'] >= quality_filter:
+                            # Como la API ya viene ordenada por precio, el primer item que cumple la calidad
+                            # es automáticamente el de menor precio para esa o mayor calidad.
+                            best_offer = item
+                            break # Encontramos la mejor oferta, podemos salir del bucle
 
-                        current_price = item['price']
-                        item_datetime_str = item['datetime']
+                if best_offer:
+                    current_price = best_offer['price']
+                    current_posted_str = best_offer['posted']
+                    current_posted = datetime.fromisoformat(current_posted_str.replace('Z', '+00:00'))
 
-                        item_datetime = datetime.fromisoformat(item_datetime_str.replace('Z', '+00:00'))
+                    last_alert_posted_str = last_alerted_datetimes.get(alert_key)
+                    last_alert_posted = None
+                    if last_alert_posted_str:
+                        last_alert_posted = datetime.fromisoformat(last_alert_posted_str.replace('Z', '+00:00'))
 
-                        last_alert_datetime_str = last_alerted_datetimes.get(alert_key)
-                        last_alert_datetime = None
-                        if last_alert_datetime_str:
-                            last_alert_datetime = datetime.fromisoformat(last_alert_datetime_str.replace('Z', '+00:00'))
+                    if current_price <= target_price:
+                        # Enviar alerta si es la primera vez o si el 'posted' ha cambiado
+                        if last_alert_posted is None or current_posted > last_alert_posted:
+                            message_raw = ( # Raw message string
+                                f"🚨 ¡ALERTA DE PRECIO! 🚨\n\n"
+                                f"Alerta: {alert_name}\n"
+                                f"Resource ID: {resource_id}\n"
+                                f"Calidad: {best_offer['quality']}\n"
+                                f"Precio Actual: {current_price} (Objetivo: {target_price})\n"
+                                f"Cantidad: {best_offer['quantity']:,}\n"
+                                f"Empresa: {best_offer['seller']['company']}\n"
+                                f"Última publicación: {current_posted.strftime('%Y-%m-%d %H:%M:%S')}"
+                            )
+                            # Escape the entire message before sending
+                            await context.bot.send_message(chat_id=user_id, text=escape_markdown_v2(message_raw), parse_mode="MarkdownV2")
 
-                        if current_price <= target_price:
-                            if last_alert_datetime is None or item_datetime > last_alert_datetime:
-                                message_raw = ( # Raw message string
-                                    f"🚨 ¡ALERTA DE PRECIO! 🚨\n\n"
-                                    f"Alerta: {alert_name}\n"
-                                    f"Resource ID: {resource_id}\n"
-                                    f"Calidad: {item['quality']}\n"
-                                    f"Precio Actual: {current_price} (Objetivo: {target_price})\n"
-                                    f"Última actualización: {item_datetime.strftime('%Y-%m-%d %H:%M:%S')}"
-                                )
-                                # Escape the entire message before sending
-                                await context.bot.send_message(chat_id=user_id, text=escape_markdown_v2(message_raw), parse_mode="MarkdownV2")
-
-                                last_alerted_datetimes[alert_key] = item_datetime_str
-                                save_last_alerted_datetimes(last_alerted_datetimes)
-                                alert_sent = True
-                                break
-
-                if not alert_sent and alert_key in last_alerted_datetimes:
+                            last_alerted_datetimes[alert_key] = current_posted_str
+                            save_last_alerted_datetimes(last_alerted_datetimes)
+                else:
+                    # Si no se encontró ninguna oferta para el recurso/calidad
+                    # No es necesario hacer nada, simplemente no se dispara la alerta.
                     pass
 
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Error HTTP al verificar precios: {e}")
     except Exception as e:
-        logger.error(f"Error en la verificación de precios: {e}", exc_info=True)
+        logger.error(f"Error general en la verificación de precios: {e}", exc_info=True)
 
 def main() -> None:
     """Función principal para ejecutar el bot."""
@@ -888,7 +937,7 @@ def main() -> None:
 
 
     job_queue: JobQueue = application.job_queue
-    job_queue.run_repeating(check_prices_job, interval=30, first=10)
+    job_queue.run_repeating(check_prices_job, interval=30, first=10) # Se ejecuta cada 30 segundos
 
     logger.info("Bot de SimcoTools iniciado...")
     application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
