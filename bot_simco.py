@@ -29,7 +29,7 @@ if not TELEGRAM_BOT_TOKEN:
 ADMIN_CODE = "e2358e" # El código que los administradores deben usar
 
 # Nueva API para el mercado
-SIMCOMPANIES_API_BASE_URL = "https://www.simcompanies.com/api/v3/market/1/"
+SIMCOMPANIES_API_BASE_URL = "https://www.simcompanies.com/api/v3/market/0/"
 RESOURCE_API_BASE_URL = "https://api.simcotools.com/v1/realms/0/market/resources/" # Se mantiene para /resource
 
 ALERTS_FILE = "alerts.json"
