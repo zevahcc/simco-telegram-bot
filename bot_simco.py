@@ -762,12 +762,16 @@ async def find_resource_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         escaped_search_query = escape_markdown_v2(search_query)
         message = f"Coincidencias encontradas para '{escaped_search_query}':\n\n"
         for name, resource_id in matches:
-            message += f"- **{escape_markdown_v2(name)}** \\(ID: `{resource_id}`\\)\n"
+            # CORRECCIÓN: Escapa el nombre antes de agregarlo al mensaje
+            escaped_name = escape_markdown_v2(name)
+            message += f"\\- **{escaped_name}** \\(ID: `{resource_id}`\\)\n"
+        
         if len(matches) > 10:
             message += escape_markdown_v2(f"\nSe encontraron {len(matches)} coincidencias. Mostrando las primeras 10. Por favor, sé más específico.")
             lines = message.split('\n')
             if len(lines) > 13:
                 message = '\n'.join(lines[:13]) + "\n" + escape_markdown_v2(f"Se encontraron {len(matches)} coincidencias. Mostrando las primeras 10. Por favor, sé más específico.")
+        
         await update.message.reply_markdown_v2(message)
     else:
         await update.message.reply_text(f"No se encontraron recursos que coincidan con '{search_query}'.")
