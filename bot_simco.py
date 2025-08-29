@@ -125,10 +125,14 @@ load_building_data()
 
 # --- Funciones de Utility ---
 def escape_markdown_v2(text: str) -> str:
-    """Escapa caracteres especiales para Telegram MarkdownV2 que podrían romper el formato."""
-    escape_chars_strict = r'\_\*\[\]()\~\`>#+-=|{}.!'
-    translator = str.maketrans({char: '\\\\' + char for char in escape_chars_strict})
-    return text.translate(translator)
+    """
+    Escapa caracteres especiales para Telegram MarkdownV2 para evitar errores de parseo.
+    Se ha corregido la lógica para que escape correctamente todos los caracteres.
+    """
+    escape_chars_strict = r'_*[]()~`>#+-=|{}.!'
+    for char in escape_chars_strict:
+        text = text.replace(char, f'\\{char}')
+    return text
 
 def find_building_by_query(query: str) -> list:
     """
@@ -217,7 +221,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "**/help**\n"
         "Muestra esta ayuda."
     )
-    await update.message.reply_markdown_v2(escape_markdown_v2(help_message_raw))
+    # Aquí se corrige el problema de la función de escape
+    escaped_message = escape_markdown_v2(help_message_raw)
+    await update.message.reply_markdown_v2(escaped_message)
 
 async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Muestra los comandos disponibles solo para administradores."""
@@ -237,7 +243,8 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "Si se proporciona solo el admin_code: Elimina **todas las alertas del bot** incluyendo las de todos los usuarios\n"
         "Si se proporciona el admin_code y un user_id: Elimina todas las alertas de ese user_id específico."
     )
-    await update.message.reply_markdown_v2(escape_markdown_v2(admin_help_message_raw))
+    escaped_message = escape_markdown_v2(admin_help_message_raw)
+    await update.message.reply_markdown_v2(escaped_message)
 
 async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -697,7 +704,7 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                         vwap = last_day_candlestick.get('vwap', 'N/A')
                         open_str = f"{open_price:.3f}" if isinstance(open_price, (int, float)) else str(open_price)
                         low_str = f"{low_price:.3f}" if isinstance(low_price, (int, float)) else str(low_price)
-                        high_str = f"{high_price:.3f}" if isinstance(high_price, (int, float)) else str(high_price)
+                        high_str = f"{high_price:.3f}" if isinstance(high_price, (int, float)) else str(high_str)
                         close_str = f"{close_price:.3f}" if isinstance(close_price, (int, float)) else str(close_str)
                         volume_str = f"{volume:,}" if isinstance(volume, (int, float)) else str(volume)
                         vwap_str = f"{vwap:.3f}" if isinstance(vwap, (int, float)) else str(vwap)
