@@ -2,7 +2,7 @@ import os
 import logging
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -11,7 +11,8 @@ from telegram.ext import (
     JobQueue
 )
 import httpx
-from unidecode import unidecode # Importar la librería para manejar tildes
+from unidecode import unidecode
+import re
 
 # Configuración de Logging
 logging.basicConfig(
@@ -26,21 +27,23 @@ if not TELEGRAM_BOT_TOKEN:
     raise ValueError("No se ha configurado la variable de entorno TELEGRAM_BOT_TOKEN.")
 
 # Código de administrador
-ADMIN_CODE = "e2358e" # El código que los administradores deben usar
+ADMIN_CODE = "e2358e"
 
 # Nueva API para el mercado
 SIMCOMPANIES_API_BASE_URL = "https://www.simcompanies.com/api/v3/market/0/"
-RESOURCE_API_BASE_URL = "https://api.simcotools.com/v1/realms/0/market/resources/" # Se mantiene para /resource
-
+RESOURCE_API_BASE_URL = "https://api.simcotools.com/v1/realms/0/market/resources/"
 ALERTS_FILE = "alerts.json"
 LAST_ALERTED_DATETIMES_FILE = "last_alerted_datetimes.json"
-STATIC_RESOURCES_FILE = "recursos_estaticos.json" # Archivo JSON con la lista estática
+STATIC_RESOURCES_FILE = "recursos_estaticos.json"
 
 # Diccionario para almacenar los recursos estáticos (nombre -> ID)
 STATIC_RESOURCES = {}
 
-# --- Funciones de Utility para Persistencia ---
+# Nueva Data de Edificios
+BUILDING_DATA_FILE = "building_data.txt"
+BUILDINGS = []
 
+# --- Funciones de Utility para Persistencia ---
 def load_alerts():
     """Carga las alertas desde el archivo JSON."""
     try:
@@ -77,55 +80,98 @@ def load_static_resources():
         if not os.path.exists(STATIC_RESOURCES_FILE):
             logger.warning(f"Archivo de recursos estáticos '{STATIC_RESOURCES_FILE}' no encontrado. Las búsquedas de nombres no funcionarán.")
             return
-
         with open(STATIC_RESOURCES_FILE, 'r', encoding='utf-8') as f:
             STATIC_RESOURCES = json.load(f)
         logger.info(f"Recursos estáticos cargados exitosamente desde {STATIC_RESOURCES_FILE}.")
     except json.JSONDecodeError:
         logger.error(f"Error al decodificar JSON en '{STATIC_RESOURCES_FILE}'. Asegúrate de que el formato sea correcto.")
-        STATIC_RESOURCES = {} # Reset to empty to prevent issues
+        STATIC_RESOURCES = {}
     except Exception as e:
         logger.error(f"Error inesperado al cargar recursos estáticos: {e}", exc_info=True)
-        STATIC_RESOURCES = {} # Reset to empty to prevent issues
+        STATIC_RESOURCES = {}
 
+def load_building_data():
+    """
+    Carga la data de edificios desde el archivo de texto BUILDING_DATA_FILE
+    y la formatea en la lista global BUILDINGS.
+    """
+    global BUILDINGS
+    try:
+        with open(BUILDING_DATA_FILE, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        for line in lines:
+            parts = [p.strip() for p in line.split(',')]
+            if len(parts) == 3:
+                building_name, bd, time = parts
+                BUILDINGS.append({
+                    "building": building_name,
+                    "bd": bd,
+                    "time": int(time)
+                })
+        logger.info(f"Datos de {len(BUILDINGS)} edificios cargados exitosamente desde {BUILDING_DATA_FILE}.")
+    except FileNotFoundError:
+        logger.error(f"El archivo de datos de edificios '{BUILDING_DATA_FILE}' no se encontró.")
+        BUILDINGS = []
+    except Exception as e:
+        logger.error(f"Error al cargar la data de edificios: {e}", exc_info=True)
+        BUILDINGS = []
 
 # Cargar alertas y datetimes al iniciar el bot
 alerts = load_alerts()
 last_alerted_datetimes = load_last_alerted_datetimes()
-load_static_resources() # Cargar los recursos estáticos al inicio del bot
+load_static_resources()
+load_building_data()
 
-# --- Helper function for MarkdownV2 escaping ---
+# --- Funciones de Utility ---
 def escape_markdown_v2(text: str) -> str:
     """Escapa caracteres especiales para Telegram MarkdownV2 que podrían romper el formato."""
-    # Updated list of characters that need escaping in MarkdownV2.
-    # The dot '.' is now explicitly included and handled.
-    # Note: Telegram's parser can be tricky. Some characters like `.` at the end of a line
-    # or next to other markdown might need explicit escaping, even if typically fine.
-    # The order matters for some characters (e.g., escaping '\' first).
-    escape_chars_strict = r'_*[]()~`>#+-=|{}.!' # All special characters
-    translator = str.maketrans({char: '\\' + char for char in escape_chars_strict})
+    escape_chars_strict = r'\_\*\[\]()\~\`>#+-=|{}.!'
+    translator = str.maketrans({char: '\\\\' + char for char in escape_chars_strict})
     return text.translate(translator)
 
-# --- Nueva función de búsqueda de recursos ---
-def search_resources_by_query(query: str) -> list[tuple[str, int]]:
+def find_building_by_query(query: str) -> list:
     """
-    Busca recursos en STATIC_RESOURCES por una cadena de consulta.
-    Ignora mayúsculas/minúsculas y tildes.
-    Retorna una lista de tuplas (nombre, id) de las coincidencias.
+    Busca edificios en la lista global BUILDINGS por su 'bd' o por una cadena de consulta en su nombre.
+    La búsqueda por nombre es insensible a mayúsculas/minúsculas y tildes.
+    Retorna una lista de diccionarios de las coincidencias.
     """
     matches = []
-    # Normaliza la consulta de búsqueda: a minúsculas y sin tildes
     normalized_query = unidecode(query).lower()
+    
+    # Búsqueda por BD (identificador)
+    for building in BUILDINGS:
+        if building['bd'].lower() == normalized_query:
+            matches.append(building)
+            # Si encuentra una coincidencia exacta por BD, la retorna inmediatamente
+            return matches
 
+    # Búsqueda por nombre si no se encontró por BD
+    for building in BUILDINGS:
+        normalized_name = unidecode(building['building']).lower()
+        if normalized_query in normalized_name:
+            matches.append(building)
+            
+    return matches
+
+def calculate_building_time(level: int, base_time: int) -> int:
+    """Calcula el tiempo de construcción total basado en el nivel y el tiempo base."""
+    if level <= 2:
+        return base_time
+    else:
+        return (level - 1) * base_time
+
+def search_resources_by_query(query: str) -> list:
+    """Busca recursos por nombre en la lista estática, ignorando mayúsculas y tildes."""
+    matches = []
+    normalized_query = unidecode(query).lower()
     for name, resource_id in STATIC_RESOURCES.items():
-        # Normaliza el nombre del recurso de la lista: a minúsculas y sin tildes
         normalized_name = unidecode(name).lower()
         if normalized_query in normalized_name:
             matches.append((name, resource_id))
     return matches
 
 # --- Comandos del Bot ---
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Envía un mensaje de bienvenida cuando se inicia el bot."""
     await update.message.reply_text(
@@ -133,40 +179,44 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Usa /help para ver los comandos disponibles."
     )
 
-async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Muestra los comandos disponibles."""
-    # The raw message string, which will be passed to the escape function
     help_message_raw = (
-        f"Comandos disponibles:\n"
+        "Comandos disponibles:\n"
         "**/alert <price objetivo> <resourceId> [quality] [name]**\n"
-        f"Crea una nueva alerta de precio\n"
-        f"price objetivo: El precio máximo al que deseas comprar\n"
-        f"resourceId: El ID del recurso número entero\n"
-        f"quality (opcional): La calidad mínima del recurso 0-12\n"
-        f"name (opcional): Un nombre para tu alerta\n\n"
+        "Crea una nueva alerta de precio\n"
+        "price objetivo: El precio máximo al que deseas comprar\n"
+        "resourceId: El ID del recurso número entero\n"
+        "quality (opcional): La calidad mínima del recurso 0-12\n"
+        "name (opcional): Un nombre para tu alerta\n\n"
         "**/edit <id> <campo> <nuevo_valor>**\n"
-        f"Edita una alerta existente por su ID\n"
-        f"campo: target_price, quality o name\n"
-        f"nuevo_valor: El nuevo valor para el campo\n\n"
+        "Edita una alerta existente por su ID\n"
+        "campo: target_price, quality o name\n"
+        "nuevo_valor: El nuevo valor para el campo\n\n"
         "**/status**\n"
-        f"Muestra el estado actual del bot\n\n"
+        "Muestra el estado actual del bot\n\n"
         "**/alerts**\n"
-        f"Muestra todas tus alertas activas\n\n"
+        "Muestra todas tus alertas activas\n\n"
         "**/delete <id1> [id2 ... id5]**\n"
-        f"Elimina una o varias alertas por sus IDs hasta 5 a la vez\n\n"
+        "Elimina una o varias alertas por sus IDs hasta 5 a la vez\n\n"
         "**/deleteall**\n"
-        f"Elimina todas las alertas\n"
-        f"**Sin argumentos**: Elimina **todas tus propias** alertas para usuarios normales\n\n"
+        "Elimina todas las alertas\n"
+        "**Sin argumentos**: Elimina **todas tus propias** alertas para usuarios normales\n\n"
         "**/price <resourceId> [quality]**\n"
-        f"Muestra el precio actual del mercado para un recurso\n\n"
+        "Muestra el precio actual del mercado para un recurso\n\n"
         "**/resource <resourceId> [quality]**\n"
-        f"Muestra información detallada sobre un recurso y sus precios del último día\n\n"
+        "Muestra información detallada sobre un recurso y sus precios del último día\n\n"
         "**/findid <nombre_del_recurso>**\n"
-        f"Busca el ID de un recurso por su nombre mínimo 3 letras, insensible a mayúsculas tildes\n\n"
+        "Busca el ID de un recurso por su nombre mínimo 3 letras, insensible a mayúsculas tildes\n\n"
+        "**/bdname <nombre_edificio>**\n"
+        "Busca un edificio por su nombre. Mínimo 3 letras, insensible a mayúsculas y tildes.\n\n"
+        "**/bdtime <bd/nombre> <nivel> <hora_inicio>**\n"
+        "Calcula la hora de finalización de una construcción. El primer parámetro puede ser el 'bd' o el nombre del edificio.\n\n"
+        "**/bdstart <bd/nombre> <nivel> <hora_fin>**\n"
+        "Calcula la hora de inicio de una construcción. El primer parámetro puede ser el 'bd' o el nombre del edificio.\n\n"
         "**/help**\n"
-        f"Muestra esta ayuda."
+        "Muestra esta ayuda."
     )
-    # Escape the entire message before sending
     await update.message.reply_markdown_v2(escape_markdown_v2(help_message_raw))
 
 async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -175,21 +225,18 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not args or len(args) != 1 or args[0] != ADMIN_CODE:
         await update.message.reply_text("Permiso denegado. Para ver los comandos de administrador, usa `/admin_help <código_de_administrador>`.")
         return
-
-    # The raw message string, which will be passed to the escape function
     admin_help_message_raw = (
-        f"Comandos de Administrador:\n\n"
+        "Comandos de Administrador:\n\n"
         "**/alerts <admin_code>**\n"
-        f"Muestra **todas las alertas** activas del bot.\n\n"
+        "Muestra **todas las alertas** activas del bot.\n\n"
         "**/delete <id1> [id2 ... id5] <admin_code>**\n"
-        f"Elimina una o varias alertas por sus IDs hasta 5 a la vez\n"
-        f"El `admin_code` debe ser el último argumento para eliminar alertas de *cualquier* usuario\n\n"
+        "Elimina una o varias alertas por sus IDs hasta 5 a la vez\n"
+        "El `admin_code` debe ser el último argumento para eliminar alertas de *cualquier* usuario\n\n"
         "**/deleteall <admin_code> [user_id]**\n"
-        f"Elimina todas las alertas del bot.\n"
-        f"Si se proporciona solo el admin_code: Elimina **todas las alertas del bot** incluyendo las de todos los usuarios\n"
-        f"Si se proporciona el admin_code y un user_id: Elimina todas las alertas de ese user_id específico."
+        "Elimina todas las alertas del bot.\n"
+        "Si se proporciona solo el admin_code: Elimina **todas las alertas del bot** incluyendo las de todos los usuarios\n"
+        "Si se proporciona el admin_code y un user_id: Elimina todas las alertas de ese user_id específico."
     )
-    # Escape the entire message before sending
     await update.message.reply_markdown_v2(escape_markdown_v2(admin_help_message_raw))
 
 async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -203,37 +250,26 @@ async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "Uso incorrecto. Ejemplo: `/alert 0.5 123 5 MiAlerta` o `/alert 0.5 123`"
         )
         return
-
     try:
         target_price = float(args[0])
         resource_id = int(args[1])
         quality = None
         name = None
-
-        remaining_args = args[2:] # Obtener todos los argumentos después de resourceId
-
+        remaining_args = args[2:]
         if remaining_args:
-            # Intentar analizar el primer argumento restante como calidad
             try:
                 potential_quality = int(remaining_args[0])
                 if 0 <= potential_quality <= 12:
                     quality = potential_quality
-                    # Si era una calidad válida, el resto es el nombre
                     if len(remaining_args) > 1:
                         name = " ".join(remaining_args[1:])
                 else:
-                    # Si es un entero pero fuera de rango, generar un error explícito
                     raise ValueError("La calidad debe estar entre 0 y 12.")
             except ValueError:
-                # Si remaining_args[0] no se puede convertir a int (o si la calidad estaba fuera de rango
-                # y se relanzó ValueError), entonces este argumento (y el resto) es el nombre
                 name = " ".join(remaining_args)
-
-        # Asignar un ID único a la alerta
         alert_id = 1
         if alerts:
             alert_id = max(alert['id'] for alert in alerts) + 1
-
         new_alert = {
             "id": alert_id,
             "user_id": update.effective_user.id,
@@ -244,10 +280,8 @@ async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         }
         alerts.append(new_alert)
         save_alerts(alerts)
-
         quality_str = f"Quality: {quality}" if quality is not None else "Todas las calidades"
         name_str = f"Nombre: {name}" if name else ""
-
         await update.message.reply_text(
             f"✅ Alerta creada con éxito:\n\n"
             f"ID: {alert_id}\n"
@@ -256,11 +290,10 @@ async def alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"{quality_str}\n"
             f"{name_str}"
         )
-
     except ValueError as e:
         await update.message.reply_text(f"Error en los parámetros: {e}")
     except Exception as e:
-        logger.error(f"Error al crear alerta: {e}", exc_info=True) # Añadido exc_info
+        logger.error(f"Error al crear alerta: {e}", exc_info=True)
         await update.message.reply_text("Ocurrió un error al crear la alerta.")
 
 async def edit_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -271,32 +304,26 @@ async def edit_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     """
     global alerts
     global last_alerted_datetimes
-
     args = context.args
     if not args or len(args) < 3:
         await update.message.reply_text(
             "Uso incorrecto. Ejemplo: `/edit 1 target_price 0.45` o `/edit 2 name MiNuevaAlerta`"
         )
         return
-
     try:
         alert_id_to_edit = int(args[0])
         field_to_edit = args[1].lower()
         new_value = " ".join(args[2:])
         user_id = update.effective_user.id
-
         found_alert = None
         for alert_data in alerts:
             if alert_data['id'] == alert_id_to_edit and alert_data['user_id'] == user_id:
                 found_alert = alert_data
                 break
-
         if not found_alert:
             await update.message.reply_text(f"No se encontró una alerta con ID {alert_id_to_edit} o no tienes permiso para editarla.")
             return
-
         original_value = found_alert.get(field_to_edit, 'N/A')
-
         if field_to_edit == "target_price":
             try:
                 found_alert['target_price'] = float(new_value)
@@ -321,10 +348,8 @@ async def edit_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         else:
             await update.message.reply_text(f"Campo '{field_to_edit}' no válido para editar. Los campos posibles son: `target_price`, `quality`, `name`.")
             return
-
         save_alerts(alerts)
         await update.message.reply_text(f"✅ {message}")
-
     except ValueError as e:
         await update.message.reply_text(f"Error en los parámetros: {e}")
     except Exception as e:
@@ -347,34 +372,27 @@ async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     """
     user_id = update.effective_user.id
     is_admin = False
-
-    # Check for admin code
     if context.args and len(context.args) == 1 and context.args[0] == ADMIN_CODE:
         is_admin = True
-        alerts_to_show = alerts # Show all alerts
+        alerts_to_show = alerts
         message_title = "Todas las alertas activas (ADMIN):\n\n"
     else:
-        alerts_to_show = [a for a in alerts if a['user_id'] == user_id] # Show user's alerts
+        alerts_to_show = [a for a in alerts if a['user_id'] == user_id]
         message_title = "Tus alertas activas:\n\n"
-
     if not alerts_to_show:
         if is_admin:
             await update.message.reply_text("No hay alertas activas en el bot.")
         else:
             await update.message.reply_text("No tienes alertas activas.")
         return
-
     try:
-        # Escape the title and then build the rest of the message with escaped components
         message = escape_markdown_v2(message_title)
         for alert_data in alerts_to_show:
             quality_info = f"Quality >= {alert_data['quality']}" if alert_data['quality'] is not None else "Todas las calidades"
             user_id_info = f"User ID: `{alert_data['user_id']}`\n" if is_admin else ""
-
             name_str = escape_markdown_v2(str(alert_data['name']))
             target_price_str = escape_markdown_v2(f"{alert_data['target_price']:.3f}")
             quality_info_str = escape_markdown_v2(quality_info)
-
             message += (
                 f"ID: {alert_data['id']}\n"
                 f"Nombre: {name_str}\n"
@@ -382,13 +400,12 @@ async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 f"Precio Objetivo: {target_price_str}\n"
                 f"{quality_info_str}\n"
                 f"{user_id_info}"
-                f"\\-\\-\\-\\n" # Keep this manually escaped for the separator
+                f"---\n"
             )
         await update.message.reply_markdown_v2(message)
     except Exception as e:
         logger.error(f"Error al mostrar alertas: {e}", exc_info=True)
         await update.message.reply_text("Ocurrió un error al intentar mostrar las alertas.")
-
 
 async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -397,7 +414,6 @@ async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """
     global alerts
     global last_alerted_datetimes
-
     args = context.args
     if not args:
         await update.message.reply_text(
@@ -405,41 +421,27 @@ async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "Puedes eliminar hasta 5 alertas a la vez."
         )
         return
-
     user_id = update.effective_user.id
     is_admin = False
     alert_ids_to_delete = []
-    admin_code_provided = False
-
-    # Check if the last argument is the admin code
     if len(args) > 1 and args[-1] == ADMIN_CODE:
         is_admin = True
-        admin_code_provided = True
-        # If admin code is provided, the IDs are all arguments except the last one
         id_args = args[:-1]
     else:
-        # Otherwise, all arguments are assumed to be IDs
         id_args = args
-
-    # Validate number of IDs
     if not (1 <= len(id_args) <= 5):
         await update.message.reply_text("Puedes eliminar entre 1 y 5 alertas a la vez.")
         return
-
-    # Parse alert IDs
     for arg_id in id_args:
         try:
             alert_ids_to_delete.append(int(arg_id))
         except ValueError:
             await update.message.reply_text(f"'{arg_id}' no es un ID de alerta válido. Los IDs deben ser números enteros.")
             return
-
     deleted_count = 0
     not_found_or_no_permission = []
-
-    initial_alerts_state = list(alerts) # Create a copy to iterate
-    updated_alerts = [] # List to build the new state of alerts
-
+    initial_alerts_state = list(alerts)
+    updated_alerts = []
     for alert_id in alert_ids_to_delete:
         found_and_deleted = False
         for alert_data in initial_alerts_state:
@@ -453,10 +455,8 @@ async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 else:
                     not_found_or_no_permission.append(f"ID {alert_id} (sin permiso)")
                 break
-
         if not found_and_deleted and alert_id not in [a['id'] for a in initial_alerts_state]:
             not_found_or_no_permission.append(f"ID {alert_id} (no encontrada)")
-
     final_alerts_list = []
     for alert_data in initial_alerts_state:
         if alert_data['id'] in alert_ids_to_delete:
@@ -466,18 +466,14 @@ async def delete_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 final_alerts_list.append(alert_data)
         else:
             final_alerts_list.append(alert_data)
-
     alerts[:] = final_alerts_list
-
     save_alerts(alerts)
     save_last_alerted_datetimes(last_alerted_datetimes)
-
     response_messages = []
     if deleted_count > 0:
         response_messages.append(f"✅ Se eliminaron {deleted_count} alerta(s) con éxito.")
     if not_found_or_no_permission:
         response_messages.append(f"⚠️ Las siguientes alertas no se encontraron o no tienes permiso para eliminarlas: {', '.join(not_found_or_no_permission)}.")
-
     if not response_messages:
         await update.message.reply_text("No se realizó ninguna eliminación.")
     else:
@@ -490,29 +486,22 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """
     global alerts
     global last_alerted_datetimes
-
     args = context.args
     user_id = update.effective_user.id
-
     if not args:
         deleted_count = 0
         deleted_alert_ids = set()
         initial_alerts_copy = list(alerts)
-
         alerts[:] = [
             alert_data for alert_data in initial_alerts_copy
             if alert_data['user_id'] != user_id
         ]
-
         deleted_count = len(initial_alerts_copy) - len(alerts)
-
         original_alert_ids_of_user = {a['id'] for a in initial_alerts_copy if a['user_id'] == user_id}
         remaining_alert_ids_of_user = {a['id'] for a in alerts if a['user_id'] == user_id}
         deleted_alert_ids_for_user = original_alert_ids_of_user - remaining_alert_ids_of_user
-
         if deleted_count > 0:
             save_alerts(alerts)
-
             keys_to_remove = []
             for key in last_alerted_datetimes:
                 parts = key.split('-')
@@ -521,18 +510,14 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             for key in keys_to_remove:
                 del last_alerted_datetimes[key]
             save_last_alerted_datetimes(last_alerted_datetimes)
-
             await update.message.reply_text(f"✅ Se eliminaron {deleted_count} alerta(s) tuyas.")
         else:
             await update.message.reply_text("No tienes alertas activas para eliminar.")
         return
-
     if args[0] != ADMIN_CODE:
         await update.message.reply_text("Permiso denegado. Solo los administradores con el código correcto pueden usar este comando con argumentos.")
         return
-
     is_admin = True
-
     try:
         user_id_to_delete_alerts_for = None
         if len(args) == 2:
@@ -541,13 +526,10 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             except ValueError:
                 await update.message.reply_text("El ID de usuario debe ser un número entero válido.")
                 return
-
         initial_len = len(alerts)
         deleted_count = 0
         deleted_alert_ids = set()
-
         temp_alerts_list = list(alerts)
-
         if user_id_to_delete_alerts_for is not None:
             alerts[:] = [
                 alert_data for alert_data in temp_alerts_list
@@ -564,10 +546,8 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             deleted_alert_ids.update(alert['id'] for alert in alerts)
             alerts.clear()
             message_suffix = " del bot"
-
         if deleted_count > 0:
             save_alerts(alerts)
-
             keys_to_remove = []
             for key in last_alerted_datetimes:
                 parts = key.split('-')
@@ -583,18 +563,15 @@ async def delete_all_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             for key in keys_to_remove:
                 del last_alerted_datetimes[key]
             save_last_alerted_datetimes(last_alerted_datetimes)
-
             await update.message.reply_text(f"✅ Se eliminaron {deleted_count} alerta(s){message_suffix}.")
         else:
             if user_id_to_delete_alerts_for:
                 await update.message.reply_text(f"No se encontraron alertas para el usuario ID {user_id_to_delete_alerts_for}.")
             else:
                 await update.message.reply_text("No hay alertas activas en el bot para eliminar.")
-
     except Exception as e:
         logger.error(f"Error al eliminar todas las alertas: {e}", exc_info=True)
         await update.message.reply_text("Ocurrió un error al intentar eliminar las alertas.")
-
 
 async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -607,7 +584,6 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "Uso incorrecto. Ejemplo: `/price 123` o `/price 123 5`"
         )
         return
-
     try:
         resource_id = int(args[0])
         quality_filter = None
@@ -615,31 +591,22 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             quality_filter = int(args[1])
             if not (0 <= quality_filter <= 12):
                 raise ValueError("La calidad debe estar entre 0 y 12.")
-
-        # Construir la URL específica del recurso para la nueva API
         api_url = f"{SIMCOMPANIES_API_BASE_URL}{resource_id}/"
-
         async with httpx.AsyncClient() as client:
             response = await client.get(api_url)
             response.raise_for_status()
-            market_data = response.json() # La respuesta es directamente la lista de ofertas
-
+            market_data = response.json()
             found_prices = []
             for item in market_data:
-                if item['kind'] == resource_id: # Usar 'kind' para resourceId
+                if item['kind'] == resource_id:
                     if quality_filter is None or item['quality'] >= quality_filter:
                         found_prices.append(item)
-
             if found_prices:
                 message = f"Precios actuales para Resource ID {resource_id}"
                 if quality_filter is not None:
                     message += f" (Quality >= {quality_filter})"
                 message += ":\n"
-
-                # La API ya viene ordenada por precio, pero podemos ordenar por calidad para la visualización si hay varias calidades
                 found_prices.sort(key=lambda x: x['quality'])
-
-                # Mostrar solo el mejor precio (más bajo) para cada calidad o el general
                 displayed_qualities = set()
                 for item in found_prices:
                     if quality_filter is None or item['quality'] >= quality_filter:
@@ -650,22 +617,17 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                                 f"(Cantidad: {item['quantity']:,}, Empresa: {item['seller']['company']}, Publicado: {posted_time})\n"
                             )
                             displayed_qualities.add(item['quality'])
-                
-                # Si se pidió una calidad específica y no se encontró, manejarlo
                 if quality_filter is not None and quality_filter not in displayed_qualities and found_prices:
-                     # Buscar si hay ofertas de la calidad exacta solicitada o superior
-                    found_exact_or_higher_quality = [
+                     found_exact_or_higher_quality = [
                         item for item in found_prices
                         if item['quality'] >= quality_filter
                     ]
                     if not found_exact_or_higher_quality:
                          await update.message.reply_text(f"No se encontraron precios para Resource ID {resource_id} con calidad >= {quality_filter}.")
                          return
-
                 await update.message.reply_text(message)
             else:
                 await update.message.reply_text(f"No se encontraron precios para Resource ID {resource_id}")
-
     except ValueError as e:
         await update.message.reply_text(f"Error en los parámetros: {e}")
     except httpx.HTTPStatusError as e:
@@ -678,7 +640,6 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error al obtener precio: {e}", exc_info=True)
         await update.message.reply_text("Ocurrió un error al obtener el precio actual.")
 
-
 async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Obtiene y muestra información detallada de un recurso usando su resourceId y opcionalmente quality.
@@ -690,13 +651,11 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             "Uso incorrecto. Ejemplo: `/resource 1` o `/resource 1 0`"
         )
         return
-
     try:
         resource_id = int(args[0])
-        if not (1 <= resource_id <= 200): # Rango de Resource ID de SimcoTools API
+        if not (1 <= resource_id <= 200):
             await update.message.reply_text("El `resourceId` debe ser un número entero entre 1 y 200.")
             return
-
         quality_filter = None
         if len(args) == 2:
             try:
@@ -706,35 +665,27 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             except ValueError:
                 await update.message.reply_text("La calidad debe ser un número entero entre 0 y 12.")
                 return
-
         full_resource_api_url = f"{RESOURCE_API_BASE_URL}{resource_id}"
-
         async with httpx.AsyncClient() as client:
             response = await client.get(full_resource_api_url)
             response.raise_for_status()
             data = response.json()
-
             resource_name = data['resource']['resourceName']
             summaries_by_quality = data['resource']['summariesByQuality']
-
-            # Apply escape_markdown_v2 to the entire base message parts
             message = escape_markdown_v2(f"📊 Información del Recurso: *{resource_name}* (ID: {resource_id})\n")
             if quality_filter is not None:
                 message += escape_markdown_v2(f"Para Calidad: {quality_filter}\n\n")
             else:
                 message += "\n"
-
             found_summaries = []
             if summaries_by_quality:
                 for summary in summaries_by_quality:
                     if quality_filter is None or summary['quality'] == quality_filter:
                         found_summaries.append(summary)
-
             if found_summaries:
                 for summary in found_summaries:
                     quality = summary['quality']
                     last_day_candlestick = summary.get('lastDayCandlestick')
-
                     message += escape_markdown_v2(f"➡️ Calidad: `{quality}`\n")
                     if last_day_candlestick:
                         open_price = last_day_candlestick.get('open', 'N/A')
@@ -743,15 +694,12 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                         close_price = last_day_candlestick.get('close', 'N/A')
                         volume = last_day_candlestick.get('volume', 'N/A')
                         vwap = last_day_candlestick.get('vwap', 'N/A')
-
                         open_str = f"{open_price:.3f}" if isinstance(open_price, (int, float)) else str(open_price)
                         low_str = f"{low_price:.3f}" if isinstance(low_price, (int, float)) else str(low_price)
                         high_str = f"{high_price:.3f}" if isinstance(high_price, (int, float)) else str(high_price)
-                        close_str = f"{close_price:.3f}" if isinstance(close_price, (int, float)) else str(close_price)
+                        close_str = f"{close_price:.3f}" if isinstance(close_price, (int, float)) else str(close_str)
                         volume_str = f"{volume:,}" if isinstance(volume, (int, float)) else str(volume)
                         vwap_str = f"{vwap:.3f}" if isinstance(vwap, (int, float)) else str(vwap)
-
-                        # Escape the data values as they are inserted into the message
                         message += escape_markdown_v2(
                             f"  Apertura: {open_str}\n"
                             f"  Mínimo: {low_str}\n"
@@ -762,14 +710,13 @@ async def get_resource_info(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                         )
                     else:
                         message += escape_markdown_v2("  Datos del último día no disponibles.\n")
-                    message += "\n" # This newline is fine
+                    message += "\n"
                 await update.message.reply_markdown_v2(message)
             else:
                 if quality_filter is not None:
                     await update.message.reply_text(f"No se encontraron datos para el Resource ID {resource_id} con calidad {quality_filter}.")
                 else:
                     await update.message.reply_text(f"No se encontraron datos de mercado para el Resource ID {resource_id}.")
-
     except ValueError:
         await update.message.reply_text("El `resourceId` debe ser un número entero válido.")
     except httpx.HTTPStatusError as e:
@@ -795,107 +742,240 @@ async def find_resource_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not args:
         await update.message.reply_text("Uso: `/findid <nombre_del_recurso>`\nPor favor, ingresa al menos 3 letras del nombre del recurso.")
         return
-
     search_query = " ".join(args)
-
     if len(search_query) < 3:
         await update.message.reply_text("Por favor, ingresa al menos 3 letras para la búsqueda del recurso.")
         return
-
     if not STATIC_RESOURCES:
         await update.message.reply_text("Lo siento, la lista de recursos estáticos no está disponible. Por favor, informa al administrador del bot.")
         return
-
     matches = search_resources_by_query(search_query)
-
     if matches:
-        # Escape the query string once
         escaped_search_query = escape_markdown_v2(search_query)
         message = f"Coincidencias encontradas para '{escaped_search_query}':\n\n"
         for name, resource_id in matches:
-            # Escape each name and ID as they are inserted
-            message += f"\\- **{escape_markdown_v2(name)}** \\(ID: `{resource_id}`\\)\n"
-
+            message += f"- **{escape_markdown_v2(name)}** \\(ID: `{resource_id}`\\)\n"
         if len(matches) > 10:
-            # Escape this specific line
             message += escape_markdown_v2(f"\nSe encontraron {len(matches)} coincidencias. Mostrando las primeras 10. Por favor, sé más específico.")
-            # To avoid potential issues with `message_parts` and `escape_markdown_v2`
-            # being applied multiple times to parts already escaped, we will manually
-            # construct the truncated message if necessary.
             lines = message.split('\n')
-            if len(lines) > 13: # 3 header lines + 10 result lines = 13
+            if len(lines) > 13:
                 message = '\n'.join(lines[:13]) + "\n" + escape_markdown_v2(f"Se encontraron {len(matches)} coincidencias. Mostrando las primeras 10. Por favor, sé más específico.")
-
         await update.message.reply_markdown_v2(message)
     else:
         await update.message.reply_text(f"No se encontraron recursos que coincidan con '{search_query}'.")
 
+# --- Nuevos Comandos de Edificios ---
+
+async def bdname(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Busca el nombre de un edificio y su BD.
+    Uso: /bdname <nombre_edificio>
+    """
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Uso incorrecto. Ejemplo: `/bdname fabrica`\n"
+            "Por favor, ingresa al menos 3 letras del nombre del edificio."
+        )
+        return
+    
+    query = " ".join(args)
+    if len(query) < 3:
+        await update.message.reply_text(
+            "La búsqueda requiere un mínimo de 3 letras."
+        )
+        return
+
+    matches = find_building_by_query(query)
+    
+    if not matches:
+        await update.message.reply_text(
+            f"No se encontraron coincidencias para '{query}'. Por favor, intenta de nuevo."
+        )
+        return
+    
+    message = f"Coincidencias encontradas para '{query}':\n\n"
+    for building in matches:
+        message += f"- {building['building']}, bd: {building['bd']}\n"
+    
+    await update.message.reply_text(message)
+
+async def bdtime(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Calcula el tiempo de finalización de una construcción.
+    Uso: /bdtime <bd/nombre> <nivel> <hora_inicio>
+    """
+    args = context.args
+    if not args or len(args) < 3:
+        await update.message.reply_text(
+            "Uso incorrecto. Ejemplo: `/bdtime 6 2 17:00` o `/bdtime fabrica de bebidas 2 17:00`"
+        )
+        return
+    
+    try:
+        level = int(args[-2])
+        start_time_str = args[-1]
+        query = " ".join(args[:-2])
+        
+        if not re.match(r'^\d{1,2}:\d{2}$', start_time_str):
+            await update.message.reply_text("El formato de la hora de inicio es incorrecto. Debe ser HH:MM (e.g., 17:00).")
+            return
+            
+        start_hour, start_minute = map(int, start_time_str.split(':'))
+        if not (0 <= start_hour <= 23 and 0 <= start_minute <= 59):
+            await update.message.reply_text("La hora de inicio no es válida.")
+            return
+
+        matches = find_building_by_query(query)
+        if not matches:
+            await update.message.reply_text(f"No se encontró un edificio que coincida con '{query}'.")
+            return
+        
+        if len(matches) > 1:
+            await update.message.reply_text(
+                "Existe más de una coincidencia para la búsqueda. Por favor, sé más específico."
+            )
+            return
+            
+        building = matches[0]
+        base_time = building['time']
+        
+        total_time = calculate_building_time(level, base_time)
+        
+        current_time = datetime.now()
+        start_datetime = current_time.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+        end_datetime = start_datetime + timedelta(hours=total_time)
+        
+        day_str = "hoy"
+        if end_datetime.date() > current_time.date():
+            day_str = end_datetime.strftime("%A").lower()
+        
+        message = (
+            f"{building['building']}\n"
+            f"bd: {building['bd']}\n"
+            f"nivel: {level}\n"
+            f"tiempo: {total_time}hr\n"
+            f"finaliza: {day_str} {end_datetime.strftime('%H:%M')}"
+        )
+        
+        await update.message.reply_text(message)
+
+    except (ValueError, IndexError):
+        await update.message.reply_text("Uso incorrecto. Asegúrate de proporcionar el bd/nombre, nivel (número entero) y hora de inicio (HH:MM).")
+    except Exception as e:
+        logger.error(f"Error en el comando bdtime: {e}", exc_info=True)
+        await update.message.reply_text("Ocurrió un error al procesar tu solicitud.")
+
+async def bdstart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Calcula el tiempo de inicio de una construcción.
+    Uso: /bdstart <bd/nombre> <nivel> <hora_fin>
+    """
+    args = context.args
+    if not args or len(args) < 3:
+        await update.message.reply_text(
+            "Uso incorrecto. Ejemplo: `/bdstart 1 3 11:00` o `/bdstart fabrica de automotores 3 11:00`"
+        )
+        return
+        
+    try:
+        level = int(args[-2])
+        end_time_str = args[-1]
+        query = " ".join(args[:-2])
+
+        if not re.match(r'^\d{1,2}:\d{2}$', end_time_str):
+            await update.message.reply_text("El formato de la hora de finalización es incorrecto. Debe ser HH:MM (e.g., 11:00).")
+            return
+
+        end_hour, end_minute = map(int, end_time_str.split(':'))
+        if not (0 <= end_hour <= 23 and 0 <= end_minute <= 59):
+            await update.message.reply_text("La hora de finalización no es válida.")
+            return
+
+        matches = find_building_by_query(query)
+        if not matches:
+            await update.message.reply_text(f"No se encontró un edificio que coincida con '{query}'.")
+            return
+        
+        if len(matches) > 1:
+            await update.message.reply_text(
+                "Existe más de una coincidencia para la búsqueda. Por favor, sé más específico."
+            )
+            return
+
+        building = matches[0]
+        base_time = building['time']
+        
+        total_time = calculate_building_time(level, base_time)
+        
+        end_datetime = datetime.now().replace(hour=end_hour, minute=end_minute, second=0, microsecond=0)
+        start_datetime = end_datetime - timedelta(hours=total_time)
+        
+        message = (
+            f"{building['building']}\n"
+            f"bd: {building['bd']}\n"
+            f"nivel: {level}\n"
+            f"tiempo: {total_time}hr\n"
+            f"iniciar: {start_datetime.strftime('%H:%M')}"
+        )
+        
+        await update.message.reply_text(message)
+
+    except (ValueError, IndexError):
+        await update.message.reply_text("Uso incorrecto. Asegúrate de proporcionar el bd/nombre, nivel (número entero) y hora de finalización (HH:MM).")
+    except Exception as e:
+        logger.error(f"Error en el comando bdstart: {e}", exc_info=True)
+        await update.message.reply_text("Ocurrió un error al procesar tu solicitud.")
 
 # --- Lógica de Verificación de Alertas (Job del Bot) ---
-
 async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Función que se ejecuta cada 30 segundos para verificar los precios."""
     logger.info("Iniciando verificación de precios...")
     if not alerts:
         logger.info("No hay alertas activas para verificar.")
         return
-
     try:
         async with httpx.AsyncClient() as client:
-            for alert_data in list(alerts): # Iterar sobre una copia para evitar problemas si se modifican
+            for alert_data in list(alerts):
                 user_id = alert_data['user_id']
                 alert_id = alert_data['id']
                 target_price = alert_data['target_price']
                 resource_id = alert_data['resource_id']
                 quality_filter = alert_data['quality']
                 alert_name = alert_data['name']
-
                 alert_key = f"{user_id}-{alert_id}"
-
-                # Construir la URL específica del recurso para la nueva API
                 api_url = f"{SIMCOMPANIES_API_BASE_URL}{resource_id}/"
-                
                 try:
                     response = await client.get(api_url)
                     response.raise_for_status()
-                    market_data = response.json() # La respuesta es directamente la lista de ofertas
+                    market_data = response.json()
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 404:
                         logger.warning(f"Resource ID {resource_id} no encontrado en la API para la alerta {alert_id}. Se saltará esta alerta.")
-                        continue # Pasar a la siguiente alerta
+                        continue
                     else:
                         logger.error(f"Error HTTP al obtener precios para Resource ID {resource_id}: {e}")
-                        continue # Pasar a la siguiente alerta
+                        continue
                 except Exception as e:
                     logger.error(f"Error inesperado al obtener precios para Resource ID {resource_id}: {e}", exc_info=True)
-                    continue # Pasar a la siguiente alerta
-
+                    continue
                 best_offer = None
-                
-                # Encontrar la mejor oferta (precio más bajo para la calidad requerida o superior)
                 for item in market_data:
-                    # 'kind' en la nueva API es equivalente a 'resourceId'
                     if item['kind'] == resource_id:
                         if quality_filter is None or item['quality'] >= quality_filter:
-                            # Como la API ya viene ordenada por precio, el primer item que cumple la calidad
-                            # es automáticamente el de menor precio para esa o mayor calidad.
                             best_offer = item
-                            break # Encontramos la mejor oferta, podemos salir del bucle
-
+                            break
                 if best_offer:
                     current_price = best_offer['price']
                     current_posted_str = best_offer['posted']
                     current_posted = datetime.fromisoformat(current_posted_str.replace('Z', '+00:00'))
-
                     last_alert_posted_str = last_alerted_datetimes.get(alert_key)
                     last_alert_posted = None
                     if last_alert_posted_str:
                         last_alert_posted = datetime.fromisoformat(last_alert_posted_str.replace('Z', '+00:00'))
-
                     if current_price <= target_price:
-                        # Enviar alerta si es la primera vez o si el 'posted' ha cambiado
                         if last_alert_posted is None or current_posted > last_alert_posted:
-                            message_raw = ( # Raw message string
+                            message_raw = (
                                 f"🚨 ¡ALERTA DE PRECIO! 🚨\n\n"
                                 f"Alerta: {alert_name}\n"
                                 f"Resource ID: {resource_id}\n"
@@ -905,25 +985,19 @@ async def check_prices_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                                 f"Empresa: {best_offer['seller']['company']}\n"
                                 f"Última publicación: {current_posted.strftime('%Y-%m-%d %H:%M:%S')}"
                             )
-                            # Escape the entire message before sending
                             await context.bot.send_message(chat_id=user_id, text=escape_markdown_v2(message_raw), parse_mode="MarkdownV2")
-
                             last_alerted_datetimes[alert_key] = current_posted_str
                             save_last_alerted_datetimes(last_alerted_datetimes)
                 else:
-                    # Si no se encontró ninguna oferta para el recurso/calidad
-                    # No es necesario hacer nada, simplemente no se dispara la alerta.
                     pass
-
     except Exception as e:
         logger.error(f"Error general en la verificación de precios: {e}", exc_info=True)
 
 def main() -> None:
     """Función principal para ejecutar el bot."""
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help))
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("admin_help", admin_help))
     application.add_handler(CommandHandler("alert", alert))
     application.add_handler(CommandHandler("edit", edit_alert))
@@ -934,11 +1008,13 @@ def main() -> None:
     application.add_handler(CommandHandler("price", get_price))
     application.add_handler(CommandHandler("resource", get_resource_info))
     application.add_handler(CommandHandler("findid", find_resource_id))
-
+    
+    application.add_handler(CommandHandler("bdname", bdname))
+    application.add_handler(CommandHandler("bdtime", bdtime))
+    application.add_handler(CommandHandler("bdstart", bdstart))
 
     job_queue: JobQueue = application.job_queue
-    job_queue.run_repeating(check_prices_job, interval=310, first=10) # Se ejecuta cada 310 segundos
-
+    job_queue.run_repeating(check_prices_job, interval=310, first=10)
     logger.info("Bot de SimcoTools iniciado...")
     application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
