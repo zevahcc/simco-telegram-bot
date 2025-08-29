@@ -393,13 +393,18 @@ async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text("No tienes alertas activas.")
         return
     try:
+        # Se asegura que el título del mensaje esté escapado
         message = escape_markdown_v2(message_title)
         for alert_data in alerts_to_show:
             quality_info = f"Quality >= {alert_data['quality']}" if alert_data['quality'] is not None else "Todas las calidades"
-            user_id_info = f"User ID: `{alert_data['user_id']}`\n" if is_admin else ""
+            
+            # Se asegura que toda la cadena esté escapada
+            user_id_info = escape_markdown_v2(f"User ID: `{alert_data['user_id']}`\n") if is_admin else ""
+            
             name_str = escape_markdown_v2(str(alert_data['name']))
             target_price_str = escape_markdown_v2(f"{alert_data['target_price']:.3f}")
             quality_info_str = escape_markdown_v2(quality_info)
+            
             message += (
                 f"ID: {alert_data['id']}\n"
                 f"Nombre: {name_str}\n"
@@ -407,7 +412,8 @@ async def show_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 f"Precio Objetivo: {target_price_str}\n"
                 f"{quality_info_str}\n"
                 f"{user_id_info}"
-                f"---\n"
+                # Aquí se escapa correctamente la línea de separación
+                f"\\-\\-\\-\n"
             )
         await update.message.reply_markdown_v2(message)
     except Exception as e:
