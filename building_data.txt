@@ -1,0 +1,49 @@
+granja, P, 1
+corral, F, 2
+panaderia, j, 5
+fabrica de bebidas, 6, 2
+abastecimiento, m, 4
+planta procesadora de alimentos, k, 6
+molino, i, 3
+matadero, e, 4
+planta de concreto, o, 5
+fabrica de construccion, x, 6
+contratista general, g, 2
+cantera, Q, 3
+fabrica textil, T, 2
+plataforma petrolera, O, 4
+central electrica, E, 3
+refineria, R, 4
+electronica aeroespacial, 8, 6
+fabrica de electronicos, L, 5
+fabrica de automotores, 1, 6
+fabrica de propulsores, D, 7
+fabrica aeroespacial, 7, 6
+hangar, 0, 3
+instalacion de integracion vertical, 9, 3
+fabrica, Y, 3
+mina, M, 4
+deposito de embarque, S, 3
+embalse de agua, W, 2
+i+d automotriz, a, 6
+laboratorio ganadero, b, 5
+laboratorio de quimica, c, 5
+diseño de moda, f, 2
+cocina, q, 4
+laboratorio de fisica, h, 7
+centro de investigacion agricola, p, 5
+i+d software, s, 3
+plataforma de lanzamiento, l, 9
+tienda de comestibles, G, 1
+tienda de electronica, C, 1
+ferreteria, d, 4
+estacion de servicio, A, 2
+tienda de moda, H, 3
+concesionario, 2, 3
+oficinas de ventas corporativas, B, 2
+restaurante, r, 3
+academia, y, 8
+castillo, 3, 12
+parque, 4, 12
+lago, 5, 12
+banco, n, 8
