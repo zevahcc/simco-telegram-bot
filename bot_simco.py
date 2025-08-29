@@ -617,8 +617,9 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                                 f"(Cantidad: {item['quantity']:,}, Empresa: {item['seller']['company']}, Publicado: {posted_time})\n"
                             )
                             displayed_qualities.add(item['quality'])
+                # La siguiente sección ha sido corregida
                 if quality_filter is not None and quality_filter not in displayed_qualities and found_prices:
-                     found_exact_or_higher_quality = [
+                    found_exact_or_higher_quality = [
                         item for item in found_prices
                         if item['quality'] >= quality_filter
                     ]
